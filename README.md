@@ -3,4 +3,12 @@ PostgreSQL Simple util tools
 install
 -------
 
-    pip3 install psql_utils
+    pip install psql_utils
+
+
+install from source
+-------------------
+
+    git clone https://github.com/Lupino/python-psql-utils.git
+    cd python-psql-utils
+    python setup.py install
