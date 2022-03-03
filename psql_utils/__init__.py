@@ -52,7 +52,7 @@ cs_all = cs(['*'])
 
 
 def columns_to_string(columns):
-    return ', '.join([x.column for x in columns])
+    return ', '.join([str(x) for x in columns])
 
 
 class IndexName(object):
@@ -206,7 +206,7 @@ async def insert(cur,
                  ret_column=None,
                  ret_def=None):
     v = [Column('%s') for x in columns]
-    ret_sql = ' returning {}'.format(ret_column.column) if ret_column else ''
+    ret_sql = ' returning {}'.format(ret_column) if ret_column else ''
     await cur.execute(
         'INSERT INTO {} ({}) VALUES ({}){}'.format(get_table_name(table_name),
                                                    columns_to_string(columns),
@@ -218,7 +218,7 @@ async def insert(cur,
 
 
 def append_excluded_set(column):
-    col = column.column
+    col = str(column)
     if col.find('=') > -1:
         return col
     return "{} = excluded.{}".format(col, col)
@@ -244,7 +244,7 @@ async def insert_or_update(cur,
 
 
 def append_update_set(column):
-    col = column.column
+    col = str(column)
     if col.find('=') > -1:
         return col
     return "{} = %s".format(col)
@@ -275,7 +275,7 @@ async def sum(cur,
               join_sql=''):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = 'SELECT sum({}) FROM {}{}{}'.format(column.column,
+    sql = 'SELECT sum({}) FROM {}{}{}'.format(str(column),
                                               get_table_name(table_name),
                                               join_sql, where_sql)
     await cur.execute(sql, args)
@@ -292,7 +292,7 @@ async def count(cur,
                 other_sql=''):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = 'SELECT count({}) FROM {}{}{} {}'.format(column.column,
+    sql = 'SELECT count({}) FROM {}{}{} {}'.format(str(column),
                                                    get_table_name(table_name),
                                                    join_sql, where_sql,
                                                    other_sql)
@@ -378,7 +378,7 @@ def gen_ordering_sql(column, arr):
         ret.append('({}, {})'.format(a, ordering))
 
     return 'JOIN (VALUES {}) AS x (id, ordering) ON {} = x.id'.format(
-        ', '.join(ret), column.column), 'ORDER BY x.ordering'
+        ', '.join(ret), str(column)), 'ORDER BY x.ordering'
 
 
 @run_with_pool()
