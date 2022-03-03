@@ -379,3 +379,19 @@ def gen_ordering_sql(column, arr):
 
     return 'JOIN (VALUES {}) AS x (id, ordering) ON {} = x.id'.format(
         ', '.join(ret), column.column), 'ORDER BY x.ordering'
+
+
+@run_with_pool()
+async def group_count(cur,
+                      table_name,
+                      columns,
+                      part_sql='',
+                      args=(),
+                      other_sql=''):
+    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
+    other_sql = ' {} '.format(other_sql) if other_sql else ''
+    sql = "SELECT COUNT(*) FROM (SELECT {} FROM {}{}{}) G".format(
+        columns_to_string(columns), get_table_name(table_name), where_sql,
+        other_sql)
+    await cur.execute(sql, args)
+    return await get_only_default(cur, 0)
