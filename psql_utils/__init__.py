@@ -170,22 +170,25 @@ def run_with_pool(cursor_factory=None):
 
 @run_with_pool()
 async def create_table(cur, table_name, columns):
-    await cur.execute('CREATE TABLE IF NOT EXISTS {} ({})'.format(
-        get_table_name(table_name), columns_to_string(columns)))
+    await fixed_execute(
+        cur, 'CREATE TABLE IF NOT EXISTS {} ({})'.format(
+            get_table_name(table_name), columns_to_string(columns)))
 
 
 @run_with_pool()
 async def add_table_column(cur, table_name, columns):
-    await cur.execute('ALTER TABLE {} ADD COLUMN {}'.format(
-        get_table_name(table_name), columns_to_string(columns)))
+    await fixed_execute(
+        cur, 'ALTER TABLE {} ADD COLUMN {}'.format(get_table_name(table_name),
+                                                   columns_to_string(columns)))
 
 
 @run_with_pool()
 async def create_index(cur, uniq, table_name, index_name, columns):
     uniq_word = 'UNIQUE ' if uniq else ''
-    await cur.execute('CREATE {}INDEX IF NOT EXISTS {} ON {} ({})'.format(
-        uniq_word, get_index_name(table_name, index_name),
-        get_table_name(table_name), columns_to_string(columns)))
+    await fixed_execute(
+        cur, 'CREATE {}INDEX IF NOT EXISTS {} ON {} ({})'.format(
+            uniq_word, get_index_name(table_name, index_name),
+            get_table_name(table_name), columns_to_string(columns)))
 
 
 async def get_only_default(cur, default):
@@ -207,7 +210,8 @@ async def insert(cur,
                  ret_def=None):
     v = [Column('%s') for x in columns]
     ret_sql = ' returning {}'.format(ret_column) if ret_column else ''
-    await cur.execute(
+    await fixed_execute(
+        cur,
         'INSERT INTO {} ({}) VALUES ({}){}'.format(get_table_name(table_name),
                                                    columns_to_string(columns),
                                                    columns_to_string(v),
@@ -240,7 +244,7 @@ async def insert_or_update(cur,
         get_table_name(table_name), columns_to_string(cols),
         columns_to_string(v), columns_to_string(uniq_columns), do_sql)
 
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
 
 
 def append_update_set(column):
@@ -256,14 +260,14 @@ async def update(cur, table_name, columns, part_sql="", args=()):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     sql = "UPDATE {} SET {}{}".format(get_table_name(table_name), set_sql,
                                       where_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
 async def delete(cur, table_name, part_sql="", args=()):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     sql = 'DELETE FROM {}{}'.format(get_table_name(table_name), where_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
@@ -278,7 +282,7 @@ async def sum(cur,
     sql = 'SELECT sum({}) FROM {}{}{}'.format(str(column),
                                               get_table_name(table_name),
                                               join_sql, where_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
 
@@ -296,7 +300,7 @@ async def count(cur,
                                                    get_table_name(table_name),
                                                    join_sql, where_sql,
                                                    other_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
 
@@ -318,7 +322,7 @@ async def select(cur,
                                                 get_table_name(table_name),
                                                 join_sql, where_sql, other_sql,
                                                 limit_sql, offset_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql)
     ret = await cur.fetchall()
     return [dict(x) for x in ret]
 
@@ -348,7 +352,7 @@ async def select_one(cur,
     sql = "SELECT {} FROM {}{}{} LIMIT 1".format(columns_to_string(columns),
                                                  get_table_name(table_name),
                                                  join_sql, where_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
     ret = await cur.fetchone()
     if ret:
         return dict(ret)
@@ -369,7 +373,8 @@ async def select_one_only(table_name,
 
 @run_with_pool()
 async def drop_table(cur, table_name):
-    await cur.execute('drop table {}'.format(get_table_name(table_name)))
+    await fixed_execute(cur,
+                        'drop table {}'.format(get_table_name(table_name)))
 
 
 def gen_ordering_sql(column, arr):
@@ -393,5 +398,12 @@ async def group_count(cur,
     sql = "SELECT COUNT(*) FROM (SELECT {} FROM {}{}{}) G".format(
         columns_to_string(columns), get_table_name(table_name), where_sql,
         other_sql)
-    await cur.execute(sql, args)
+    await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
+
+
+def fixed_execute(cur, sql, args=None):
+    if args and len(args) > 0:
+        return cur.execute(sql, args)
+    else:
+        return cur.execute(sql)
