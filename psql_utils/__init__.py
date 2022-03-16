@@ -322,7 +322,7 @@ async def select(cur,
                                                 get_table_name(table_name),
                                                 join_sql, where_sql, other_sql,
                                                 limit_sql, offset_sql)
-    await fixed_execute(cur, sql)
+    await fixed_execute(cur, sql, args)
     ret = await cur.fetchall()
     return [dict(x) for x in ret]
 
