@@ -183,10 +183,17 @@ async def save(table,
         return nid
 
 
-async def remove(table, *args, **kwargs):
-    old = await get(table, *args, fields=['id'], **kwargs)
+async def remove(table, *args, on_removed=None, **kwargs):
+    fields = ['*'] if on_removed else ['id']
+
+    old = await get(table, *args, fields=fields, **kwargs)
     if old:
         await delete(table, 'id=%s', (old['id'], ))
+        if on_removed:
+            ret = on_removed(old)
+            if asyncio.iscoroutine(ret):
+                await ret
+
         return True
     return False
 
