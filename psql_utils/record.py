@@ -157,8 +157,7 @@ async def save(table,
         await update(table, cs(rkeys), 'id=%s', tuple(args))
 
         if on_saved:
-            new = await get(table, id=old['id'])
-            ret = on_saved(old, new)
+            ret = on_saved(old, old['id'])
             if asyncio.iscoroutine(ret):
                 await ret
         return old['id']
@@ -175,8 +174,7 @@ async def save(table,
 
         nid = await insert(table, cs(rkeys), tuple(args), c('id'))
         if on_saved:
-            new = await get(table, id=nid)
-            ret = on_saved(None, new)
+            ret = on_saved(None, nid)
             if asyncio.iscoroutine(ret):
                 await ret
 
