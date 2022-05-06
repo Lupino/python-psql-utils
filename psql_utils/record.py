@@ -3,6 +3,7 @@ from . import select_one_only, select_one, select, count as pg_count, \
 import json
 from time import time
 import re
+import asyncio
 
 re_op = re.compile('_(gt|lt|gte|lte)$')
 
@@ -83,6 +84,7 @@ async def save(table,
                sub_json_keys=[],
                replace_keys=[],
                exclude_data_keys=[],
+               on_saved=None,
                **data):
 
     if len(exclude_data_keys) > 0:
@@ -153,6 +155,12 @@ async def save(table,
 
         args.append(old['id'])
         await update(table, cs(rkeys), 'id=%s', tuple(args))
+
+        if on_saved:
+            new = await get(table, id=old['id'])
+            ret = on_saved(old, new)
+            if asyncio.iscoroutine(ret):
+                await ret
         return old['id']
     else:
         for key in uniq_keys:
@@ -165,7 +173,14 @@ async def save(table,
             rkeys.append('created_at')
             args.append(int(time()))
 
-        return await insert(table, cs(rkeys), tuple(args), c('id'))
+        nid = await insert(table, cs(rkeys), tuple(args), c('id'))
+        if on_saved:
+            new = await get(table, id=nid)
+            ret = on_saved(None, new)
+            if asyncio.iscoroutine(ret):
+                await ret
+
+        return nid
 
 
 async def remove(table, *args, **kwargs):
