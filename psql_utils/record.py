@@ -18,11 +18,11 @@ def merge_json(new, old):
 
 def merge_sub_json(data0, data1, replace_keys=[]):
     for k, v in data1.items():
-        new = data0.get(k)
-        if new is None:
-            data0[k] = v
-        else:
-            if k not in replace_keys:
+        if k not in replace_keys:
+            new = data0.get(k)
+            if new is None:
+                data0[k] = v
+            else:
                 data0[k] = merge_json(data0[k], v)
 
     return data0
