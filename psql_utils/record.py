@@ -32,6 +32,7 @@ async def get(table,
               *,
               id=None,
               uniq_keys=[],
+              optional_keys=[],
               fields=['*'],
               popup=False,
               **data):
@@ -50,8 +51,10 @@ async def get(table,
         for key in uniq_keys:
             val = data.get(key)
             if not val:
-                get_max_id = True
-                continue
+                if key in optional_keys:
+                    get_max_id = True
+                    continue
+                raise Exception(f'{key} is required')
 
             part_sql.append(f'{key}=%s')
             args.append(val)
