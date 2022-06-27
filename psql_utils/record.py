@@ -83,6 +83,7 @@ async def save(table,
                id=None,
                keys=[],
                uniq_keys=[],
+               optional_keys=[],
                json_keys=[],
                sub_json_keys=[],
                replace_keys=[],
@@ -103,7 +104,10 @@ async def save(table,
         if not old:
             raise Exception(f'update record[{id}], the record is not exists')
     else:
-        old = await get(table, uniq_keys=uniq_keys, **uniq_data)
+        old = await get(table,
+                        uniq_keys=uniq_keys,
+                        optional_keys=optional_keys,
+                        **uniq_data)
 
     rkeys = []
     args = []
@@ -147,7 +151,10 @@ async def save(table,
                 uniq_changed = True
 
         if uniq_changed:
-            old1 = await get(table, uniq_keys=uniq_keys, **uniq_data)
+            old1 = await get(table,
+                             uniq_keys=uniq_keys,
+                             optional_keys=optional_keys,
+                             **uniq_data)
             if old1:
                 oid = old1['id']
                 err = f'cant update record uniq value to exists value {oid}'
