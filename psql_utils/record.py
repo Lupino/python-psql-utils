@@ -36,6 +36,7 @@ async def get(table,
               fields=['*'],
               popup=False,
               **data):
+
     part_sql = ''
     args = ()
     if id:
@@ -43,14 +44,14 @@ async def get(table,
         args = (id, )
     else:
         if len(uniq_keys) == 0:
-            return None
+            raise Exception(f'uniq_keys is required')
 
         part_sql = []
         args = []
         get_max_id = False
         for key in uniq_keys:
             val = data.get(key)
-            if not val:
+            if val is None:
                 if key in optional_keys:
                     get_max_id = True
                     continue

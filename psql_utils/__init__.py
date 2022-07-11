@@ -5,6 +5,7 @@ from psycopg2.extras import DictCursor
 
 
 class TableName(object):
+
     def __init__(self, table_name, alias=None):
         self.table_name = table_name
         self.alias_name = alias
@@ -30,6 +31,7 @@ def t(table_name):
 
 
 class Column(object):
+
     def __init__(self, column):
         self.column = column
 
@@ -56,6 +58,7 @@ def columns_to_string(columns):
 
 
 class IndexName(object):
+
     def __init__(self, index_name):
         self.index_name = index_name
 
@@ -84,6 +87,7 @@ class PGConnnectorError(Exception):
 
 
 class PGConnnector():
+
     def __init__(self, config):
         self.config = config
         self.pool = None
@@ -135,7 +139,9 @@ async def close():
 
 
 def run_with_pool(cursor_factory=None):
+
     def decorator(f):
+
         @wraps(f)
         async def run(*args, cur=None, **kwargs):
             if _connector is None:
