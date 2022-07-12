@@ -44,7 +44,7 @@ async def get(table,
         args = (id, )
     else:
         if len(uniq_keys) == 0:
-            raise Exception(f'uniq_keys is required')
+            return None
 
         part_sql = []
         args = []
