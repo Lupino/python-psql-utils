@@ -38,17 +38,15 @@ async def get(table,
               popup=False,
               **data):
 
-    part_sql = ''
-    args = ()
+    part_sql = []
+    args = []
     if id:
-        part_sql = 'id=%s'
-        args = (id, )
+        part_sql.append('id=%s')
+        args.append(id)
     else:
         if len(uniq_keys) == 0:
-            return None
+            raise Exception(f'uniq_keys is required')
 
-        part_sql = []
-        args = []
         get_max_id = False
         for key in uniq_keys:
             val = data.pop(key, None)
@@ -62,21 +60,27 @@ async def get(table,
             part_sql.append(f'{key}=%s')
             args.append(val)
 
-        for key, val in data.items():
-            part_sql.append(f'{key}=%s')
-            args.append(val)
-
-        part_sql = ' AND '.join(part_sql)
-        args = tuple(args)
-
         if get_max_id:
+            for key, val in data.items():
+                part_sql.append(f'{key}=%s')
+                args.append(val)
+
+            part_sql = ' AND '.join(part_sql)
+            args = tuple(args)
+
             id = await select_one_only(table, c('max(id)'), part_sql, args)
             if not id:
                 return None
 
-            part_sql = 'id=%s'
-            args = (id, )
+            part_sql = ['id=%s']
+            args = [id]
 
+    for key, val in data.items():
+        part_sql.append(f'{key}=%s')
+        args.append(val)
+
+    part_sql = ' AND '.join(part_sql)
+    args = tuple(args)
     ret = await select_one(table, cs(fields), part_sql, args)
 
     if popup:
