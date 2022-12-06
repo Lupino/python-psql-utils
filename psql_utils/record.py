@@ -45,7 +45,7 @@ async def get(table,
         args.append(id)
     else:
         if len(uniq_keys) == 0:
-            raise Exception(f'uniq_keys is required')
+            raise Exception('uniq_keys is required')
 
         get_max_id = False
         for key in uniq_keys:
@@ -62,6 +62,8 @@ async def get(table,
 
         if get_max_id:
             for key, val in data.items():
+                if val is None:
+                    continue
                 part_sql.append(f'{key}=%s')
                 args.append(val)
 
@@ -76,6 +78,8 @@ async def get(table,
             args = [id]
 
     for key, val in data.items():
+        if val is None:
+            continue
         part_sql.append(f'{key}=%s')
         args.append(val)
 
