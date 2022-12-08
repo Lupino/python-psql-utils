@@ -28,12 +28,21 @@ def merge_sub_json(data0, data1, replace_keys=[]):
     return data0
 
 
+def append_extra(part_sql, args, data):
+    for key, val in data.items():
+        if val is None:
+            continue
+        part_sql.append(f'{key}=%s')
+        args.append(val)
+
+
 async def get(table,
               *,
               id=None,
               uniq_keys=[],
               optional_keys=[],
               required_uniq_keys=True,
+              ignore_extra_keys=False,
               fields=['*'],
               popup=False,
               **data):
@@ -61,11 +70,8 @@ async def get(table,
             args.append(val)
 
         if get_max_id:
-            for key, val in data.items():
-                if val is None:
-                    continue
-                part_sql.append(f'{key}=%s')
-                args.append(val)
+            if not ignore_extra_keys:
+                append_extra(part_sql, args, data)
 
             part_sql = ' AND '.join(part_sql)
             args = tuple(args)
@@ -77,11 +83,8 @@ async def get(table,
             part_sql = ['id=%s']
             args = [id]
 
-    for key, val in data.items():
-        if val is None:
-            continue
-        part_sql.append(f'{key}=%s')
-        args.append(val)
+    if not ignore_extra_keys:
+        append_extra(part_sql, args, data)
 
     part_sql = ' AND '.join(part_sql)
     args = tuple(args)
@@ -209,7 +212,11 @@ async def save(table,
 async def remove(table, *args, on_removed=None, **kwargs):
     fields = ['*'] if on_removed else ['id']
 
-    old = await get(table, *args, fields=fields, **kwargs)
+    old = await get(table,
+                    *args,
+                    fields=fields,
+                    ignore_extra_keys=True,
+                    **kwargs)
     if old:
         await delete(table, 'id=%s', (old['id'], ))
         if on_removed:
