@@ -54,7 +54,11 @@ async def get(table,
         args.append(id)
     else:
         if len(uniq_keys) == 0:
-            raise Exception('uniq_keys is required')
+            if required_uniq_keys:
+                if ignore_extra_keys:
+                    return None
+                else:
+                    raise Exception('uniq_keys is required')
 
         get_max_id = False
         for key in uniq_keys:
@@ -125,6 +129,8 @@ async def save(table,
         old = await get(table,
                         uniq_keys=uniq_keys,
                         optional_keys=optional_keys,
+                        required_uniq_keys=True,
+                        ignore_extra_keys=True,
                         **uniq_data)
 
     rkeys = []
@@ -172,6 +178,8 @@ async def save(table,
             old1 = await get(table,
                              uniq_keys=uniq_keys,
                              optional_keys=optional_keys,
+                             required_uniq_keys=True,
+                             ignore_extra_keys=True,
                              **uniq_data)
             if old1:
                 oid = old1['id']
