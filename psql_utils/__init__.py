@@ -6,24 +6,47 @@ from psycopg2.extras import DictCursor
 
 class TableName(object):
 
-    def __init__(self, table_name, alias=None):
+    def __init__(self, table_name, alias=None, joins=[]):
         self.table_name = table_name
         self.alias_name = alias
+        self.joins = joins
 
     def alias(self, alias):
-        return TableName(self.table_name, alias)
+        return TableName(self.table_name, alias, self.joins[:])
+
+    def join(self, table, where):
+        joins = self.joins[:]
+        joins.append(LeftJoin(table, where))
+
+        return TableName(self.table_name, self.alias_name, joins)
 
     def __str__(self):
-        return self.table_name
+        if self.alias_name is None:
+            table_name = f'"{self.table_name}"'
+        else:
+            table_name = f'"{self.table_name}" AS {self.alias_name}'
+
+        if len(self.joins) > 0:
+            table_name += ' ' + ' '.join([str(join) for join in self.joins])
+
+        return table_name
+
+
+class LeftJoin(object):
+
+    def __init__(self, table_name, where):
+        self.table_name = table_name
+        self.where = where
+
+    def __str__(self):
+        return f'''LEFT JOIN {str(self.table_name)} ON {self.where} '''
 
 
 def get_table_name(table_name):
     if isinstance(table_name, list):
-        return ', '.join([get_table_name(tn) for tn in table_name])
+        return ', '.join([str(tn) for tn in table_name])
 
-    if table_name.alias_name is None:
-        return '"{}"'.format(table_name.table_name)
-    return '"{}" AS {}'.format(table_name.table_name, table_name.alias_name)
+    return str(table_name)
 
 
 def t(table_name):
