@@ -168,15 +168,16 @@ async def save(table,
 
     if old:
         uniq_changed = False
-        for key in uniq_keys:
-            val = data.get(key)
-            if val is not None:
-                if old[key] == val:
-                    continue
+        if id:
+            for key in uniq_keys:
+                val = data.get(key)
+                if val is not None:
+                    if old[key] == val:
+                        continue
 
-                rkeys.append(key)
-                args.append(val)
-                uniq_changed = True
+                    rkeys.append(key)
+                    args.append(val)
+                    uniq_changed = True
 
         if uniq_changed:
             old1 = await get(table,
