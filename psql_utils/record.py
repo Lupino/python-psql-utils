@@ -162,6 +162,10 @@ async def save(table,
             rkeys.append(key)
             args.append(json.dumps(val))
 
+    if 'updated_at' in keys and data.get('updated_at') is None:
+        rkeys.append('updated_at')
+        args.append(int(time()))
+
     if old:
         uniq_changed = False
         for key in uniq_keys:
