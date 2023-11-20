@@ -251,13 +251,22 @@ op_map = {
 }
 
 
+def format_key(key, val):
+    if key.find('.') > -1:
+        keys = key.split('.')
+        return keys[0] + "#>>'{" + ', '.join(keys[1:]) + "}'"
+
+    return key
+
+
 def append_query(query, key, val):
     if val is None:
         return
 
     if isinstance(val, list):
         vs = ['%s' for x in val]
-        query.append((key, f'{key} in (' + ', '.join(vs) + ')', val))
+        fkey = format_key(key, val[0])
+        query.append((key, f'{fkey} in (' + ', '.join(vs) + ')', val))
         return
 
     m = re_op.search(key)
@@ -268,7 +277,8 @@ def append_query(query, key, val):
         key = key[:-len(op) - 1]
         op = op_map[op]
 
-    query.append((key, f'{key}{op}%s', val))
+    fkey = format_key(key, val)
+    query.append((key, f'{fkey}{op}%s', val))
 
 
 def sort_query(query, sort_keys):
