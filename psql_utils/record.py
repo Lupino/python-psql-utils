@@ -6,6 +6,7 @@ import re
 import asyncio
 
 re_op = re.compile('_(gt|lt|gte|lte|neq|like)$')
+re_num = re.compile(r'^\d+(.\d+)?$')
 
 
 def merge_json(new, old):
@@ -254,7 +255,14 @@ op_map = {
 def format_key(key, val):
     if key.find('.') > -1:
         keys = key.split('.')
-        return keys[0] + "#>>'{" + ', '.join(keys[1:]) + "}'"
+        out = keys[0] + "#>>'{" + ', '.join(keys[1:]) + "}'"
+        if re_num.search(val):
+            if val.isdigit():
+                tp = 'int'
+            else:
+                tp = 'float'
+            out = f'cast({out} as {tp})'
+        return out
 
     return key
 
