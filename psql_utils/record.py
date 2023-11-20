@@ -5,7 +5,7 @@ from time import time
 import re
 import asyncio
 
-re_op = re.compile('_(gt|lt|gte|lte|like)$')
+re_op = re.compile('_(gt|lt|gte|lte|neq|like)$')
 
 
 def merge_json(new, old):
@@ -241,7 +241,14 @@ async def remove(table, *args, on_removed=None, **kwargs):
     return False
 
 
-op_map = {'gt': '>', 'lt': '<', 'lte': '<=', 'gte': '>=', 'like': ' like '}
+op_map = {
+    'gt': '>',
+    'lt': '<',
+    'lte': '<=',
+    'gte': '>=',
+    'neq': '!=',
+    'like': ' like '
+}
 
 
 def append_query(query, key, val):
