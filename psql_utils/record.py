@@ -252,10 +252,22 @@ op_map = {
 }
 
 
-def format_key(key, val):
+def format_key(key, val, json_keys=[]):
     if key.find('.') > -1:
         keys = key.split('.')
-        out = keys[0] + "#>>'{" + ', '.join(keys[1:]) + "}'"
+
+        prefix = ''
+
+        if keys[0] in json_keys:
+            prefix = keys[0]
+            keys = keys[1:]
+        elif keys[1] in json_keys:
+            prefix = keys[0] + '.' + keys[1]
+            keys = keys[2:]
+        else:
+            return key
+
+        out = prefix + "#>>'{" + ', '.join(keys) + "}'"
         if re_num.search(val):
             if val.isdigit():
                 tp = 'int'
@@ -267,13 +279,13 @@ def format_key(key, val):
     return key
 
 
-def append_query(query, key, val):
+def append_query(query, key, val, json_keys=[]):
     if val is None:
         return
 
     if isinstance(val, list):
         vs = ['%s' for x in val]
-        fkey = format_key(key, val[0])
+        fkey = format_key(key, val[0], json_keys)
         query.append((key, f'{fkey} in (' + ', '.join(vs) + ')', val))
         return
 
@@ -285,7 +297,7 @@ def append_query(query, key, val):
         key = key[:-len(op) - 1]
         op = op_map[op]
 
-    fkey = format_key(key, val)
+    fkey = format_key(key, val, json_keys)
     query.append((key, f'{fkey}{op}%s', val))
 
 
@@ -324,10 +336,10 @@ def record_query_to_sql(query, part_sql='', args=()):
     return ' AND '.join(new_part_sql), tuple(new_args)
 
 
-def gen_query(*args, sort_keys=[], part_sql='', **data):
+def gen_query(*args, sort_keys=[], part_sql='', json_keys=[], **data):
     query = []
     for key, val in data.items():
-        append_query(query, key, val)
+        append_query(query, key, val, json_keys)
 
     query = sort_query(query, sort_keys)
 
