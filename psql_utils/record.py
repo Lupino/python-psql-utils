@@ -334,14 +334,21 @@ def gen_query(*args, sort_keys=[], part_sql='', **data):
     return record_query_to_sql(query, part_sql, args)
 
 
-async def count(table, *args, field='*', join_sql='', other_sql='', **kwargs):
+async def count(table,
+                *args,
+                field='*',
+                join_sql='',
+                groups=None,
+                sorts=None,
+                **kwargs):
     part_sql, args = gen_query(*args, **kwargs)
     return await pg_count(table,
                           part_sql,
                           args,
                           column=c(field),
                           join_sql=join_sql,
-                          other_sql=other_sql)
+                          groups=groups,
+                          sorts=sorts)
 
 
 async def get_list(table,
@@ -351,7 +358,8 @@ async def get_list(table,
                    fields=['*'],
                    popup=False,
                    join_sql='',
-                   other_sql='order by id desc',
+                   groups=None,
+                   sorts='id desc',
                    **kwargs):
 
     part_sql, args = gen_query(*args, **kwargs)
@@ -362,7 +370,8 @@ async def get_list(table,
                        offset=offset,
                        size=size,
                        join_sql=join_sql,
-                       other_sql=other_sql)
+                       groups=groups,
+                       sorts=sorts)
 
     if popup:
         return [popup_data(v) for v in ret]

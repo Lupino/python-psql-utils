@@ -322,13 +322,17 @@ async def count(cur,
                 args=(),
                 column=c('*'),
                 join_sql='',
-                other_sql=''):
+                groups=None,
+                sorts=None):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = 'SELECT count({}) FROM {}{}{} {}'.format(str(column),
-                                                   get_table_name(table_name),
-                                                   join_sql, where_sql,
-                                                   other_sql)
+    sql = 'SELECT count({}) FROM {}{}{}{}'.format(
+        str(column),
+        get_table_name(table_name),
+        join_sql,
+        where_sql,
+        format_group_and_sort_sql(groups, sorts),
+    )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
@@ -341,16 +345,22 @@ async def select(cur,
                  args=(),
                  offset=None,
                  size=None,
-                 other_sql="",
+                 groups=None,
+                 sorts=None,
                  join_sql=''):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
     limit_sql = '' if size is None else ' LIMIT {}'.format(size)
     offset_sql = '' if offset is None else ' OFFSET {}'.format(offset)
-    sql = "SELECT {} FROM {}{}{} {}{}{}".format(columns_to_string(columns),
-                                                get_table_name(table_name),
-                                                join_sql, where_sql, other_sql,
-                                                limit_sql, offset_sql)
+    sql = "SELECT {} FROM {}{}{} {}{}{}".format(
+        columns_to_string(columns),
+        get_table_name(table_name),
+        join_sql,
+        where_sql,
+        format_group_and_sort_sql(groups, sorts),
+        limit_sql,
+        offset_sql,
+    )
     await fixed_execute(cur, sql, args)
     ret = await cur.fetchall()
     return [dict(x) for x in ret]
@@ -362,10 +372,20 @@ async def select_only(table_name,
                       args=(),
                       offset=None,
                       size=None,
-                      other_sql='',
+                      groups=None,
+                      sorts=None,
                       join_sql=''):
-    ret = await select(table_name, [column], part_sql, args, offset, size,
-                       other_sql, join_sql)
+    ret = await select(
+        table_name,
+        [column],
+        part_sql,
+        args,
+        offset,
+        size,
+        groups,
+        sorts,
+        join_sql,
+    )
     return [list(x.values())[0] for x in ret]
 
 
@@ -421,12 +441,15 @@ async def group_count(cur,
                       columns,
                       part_sql='',
                       args=(),
-                      other_sql=''):
+                      groups=None,
+                      sorts=None):
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    other_sql = ' {} '.format(other_sql) if other_sql else ''
     sql = "SELECT COUNT(*) FROM (SELECT {} FROM {}{}{}) G".format(
-        columns_to_string(columns), get_table_name(table_name), where_sql,
-        other_sql)
+        columns_to_string(columns),
+        get_table_name(table_name),
+        where_sql,
+        format_group_and_sort_sql(groups, sorts),
+    )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
@@ -436,3 +459,9 @@ def fixed_execute(cur, sql, args=None):
         return cur.execute(sql, args)
     else:
         return cur.execute(sql)
+
+
+def format_group_and_sort_sql(groups, sorts):
+    group_sql = f' GROUP BY {groups}' if groups else ''
+    sort_sql = f' ORDER BY {sorts}' if sorts else ''
+    return group_sql + sort_sql
