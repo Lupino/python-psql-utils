@@ -268,12 +268,29 @@ def format_key(key, val, json_keys=[]):
             return key
 
         out = prefix + "#>>'{" + ', '.join(keys) + "}'"
-        if re_num.search(val):
-            if val.isdigit():
-                tp = 'int'
-            else:
-                tp = 'float'
+
+        tp = ''
+
+        if isinstance(val, str) or isinstance(val, bytes):
+            if re_num.search(val):
+                if val.isdigit():
+                    tp = 'int'
+                else:
+                    tp = 'float'
+
+        if isinstance(val, int):
+            tp = 'int'
+
+        if isinstance(val, float):
+            tp = 'float'
+
+        l_val = val.lower()
+        if isinstance(val, bool) or l_val == 'true' or l_val == 'false':
+            tp = 'bool'
+
+        if tp:
             out = f'cast({out} as {tp})'
+
         return out
 
     return key
