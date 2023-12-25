@@ -5,7 +5,22 @@ from time import time
 import re
 import asyncio
 
-re_op = re.compile('_(gt|lt|gte|lte|neq|like|in)$')
+op_map = {
+    'gt': '>',
+    'lt': '<',
+    'lte': '<=',
+    'gte': '>=',
+    'neq': '!=',
+    'like': ' like ',
+    'unlike': ' not like ',
+    'in': ' in ',
+    'match': ' ~* ',
+    'unmatch': ' !~* ',
+    'similar': ' similar to ',
+    'unsimilar': ' not similar to ',
+}
+
+re_op = re.compile('_(' + '|'.join(op_map.keys()) + ')$')
 re_num = re.compile(r'^\d+(.\d+)?$')
 
 
@@ -240,17 +255,6 @@ async def remove(table, *args, on_removed=None, **kwargs):
 
         return True
     return False
-
-
-op_map = {
-    'gt': '>',
-    'lt': '<',
-    'lte': '<=',
-    'gte': '>=',
-    'neq': '!=',
-    'like': ' like ',
-    'in': ' in ',
-}
 
 
 def format_key(key, val, json_keys=[]):
