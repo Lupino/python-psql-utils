@@ -5,7 +5,7 @@ from time import time
 import re
 import asyncio
 
-re_op = re.compile('_(gt|lt|gte|lte|neq|like)$')
+re_op = re.compile('_(gt|lt|gte|lte|neq|like|in)$')
 re_num = re.compile(r'^\d+(.\d+)?$')
 
 
@@ -248,7 +248,8 @@ op_map = {
     'lte': '<=',
     'gte': '>=',
     'neq': '!=',
-    'like': ' like '
+    'like': ' like ',
+    'in': ' in ',
 }
 
 
@@ -321,8 +322,12 @@ def append_query(query, key, val, json_keys=[]):
         key = key[:-len(op) - 1]
         op = op_map[op]
 
-    fkey = format_key(key, val, json_keys)
-    query.append((key, f'{fkey}{op}%s', val))
+    if op.strip() == 'in':
+        val = [x.strip() for x in val.split(',')]
+        append_query(query, key, val, json_keys=json_keys)
+    else:
+        fkey = format_key(key, val, json_keys)
+        query.append((key, f'{fkey}{op}%s', val))
 
 
 def sort_query(query, sort_keys):
