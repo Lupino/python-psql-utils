@@ -257,64 +257,73 @@ async def remove(table, *args, on_removed=None, **kwargs):
     return False
 
 
-def format_key(key, val, json_keys=[]):
-    if key.find('.') > -1:
-        keys = key.split('.')
-
-        prefix = ''
-
-        if keys[0] in json_keys:
-            prefix = keys[0]
-            keys = keys[1:]
-        elif keys[1] in json_keys:
-            prefix = keys[0] + '.' + keys[1]
-            keys = keys[2:]
-        else:
+def format_key(key, val, json_keys=[], keys=[]):
+    if key.find('.') == -1:
+        if len(keys) == 0:
             return key
 
-        out = prefix + "#>>'{" + ', '.join(keys) + "}'"
+        if key in keys:
+            return key
 
-        tp = ''
+        if 'data' not in json_keys:
+            return key
 
-        if isinstance(val, bytes):
-            val = str(val, 'utf-8')
+        return format_key('data.' + key, val, json_keys=json_keys, keys=keys)
 
-        if isinstance(val, str):
-            if re_num.search(val):
-                if val.isdigit():
-                    tp = 'int'
-                else:
-                    tp = 'float'
+    keys = key.split('.')
 
+    prefix = ''
+
+    if keys[0] in json_keys:
+        prefix = keys[0]
+        keys = keys[1:]
+    elif keys[1] in json_keys:
+        prefix = keys[0] + '.' + keys[1]
+        keys = keys[2:]
+    else:
+        return key
+
+    out = prefix + "#>>'{" + ', '.join(keys) + "}'"
+
+    tp = ''
+
+    if isinstance(val, bytes):
+        val = str(val, 'utf-8')
+
+    if isinstance(val, str):
+        if re_num.search(val):
+            if val.isdigit():
+                tp = 'int'
             else:
-                l_val = val.lower()
-                if l_val == 'true' or l_val == 'false':
-                    tp = 'boolean'
+                tp = 'float'
 
-        if isinstance(val, int):
-            tp = 'int'
+        else:
+            l_val = val.lower()
+            if l_val == 'true' or l_val == 'false':
+                tp = 'boolean'
 
-        if isinstance(val, float):
-            tp = 'float'
+    if isinstance(val, int):
+        tp = 'int'
 
-        if isinstance(val, bool):
-            tp = 'boolean'
+    if isinstance(val, float):
+        tp = 'float'
 
-        if tp:
-            out = f'cast({out} as {tp})'
+    if isinstance(val, bool):
+        tp = 'boolean'
 
-        return out
+    if tp:
+        out = f'cast({out} as {tp})'
 
-    return key
+    return out
 
 
-def append_query(query, key, val, json_keys=[]):
+def append_query(query, key, val, json_keys=[], keys=[]):
     if val is None:
         return
 
     if isinstance(val, list):
         vs = ['%s' for x in val]
-        fkey = format_key(key, val[0], json_keys)
+        fkey = format_key(key, val[0], json_keys=json_keys, keys=keys)
         query.append((key, f'{fkey} in (' + ', '.join(vs) + ')', val))
         return
 
@@ -328,9 +337,9 @@ def append_query(query, key, val, json_keys=[]):
 
     if op.strip() == 'in':
         val = [x.strip() for x in val.split(',')]
-        append_query(query, key, val, json_keys=json_keys)
+        append_query(query, key, val, json_keys=json_keys, keys=keys)
     else:
-        fkey = format_key(key, val, json_keys)
+        fkey = format_key(key, val, json_keys=json_keys, keys=keys)
         query.append((key, f'{fkey}{op}%s', val))
 
 
@@ -369,10 +378,10 @@ def record_query_to_sql(query, part_sql='', args=()):
     return ' AND '.join(new_part_sql), tuple(new_args)
 
 
-def gen_query(*args, sort_keys=[], part_sql='', json_keys=[], **data):
+def gen_query(*args, sort_keys=[], part_sql='', json_keys=[], keys=[], **data):
     query = []
     for key, val in data.items():
-        append_query(query, key, val, json_keys)
+        append_query(query, key, val, json_keys=json_keys, keys=keys)
 
     query = sort_query(query, sort_keys)
 
