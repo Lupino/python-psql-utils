@@ -16,7 +16,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    'aiopg'
+    'aiopg',
+    'mypy_extensions'
 ]
 
 [tool.setuptools]

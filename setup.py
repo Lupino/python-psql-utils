@@ -5,7 +5,7 @@ except ImportError:
 
 packages = ['psql_utils']
 
-requires = ['aiopg']
+requires = ['aiopg', 'mypy_extensions']
 
 setup(
     name='psql_utils',

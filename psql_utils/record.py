@@ -1,9 +1,11 @@
 from . import select_one_only, select_one, select, count as pg_count, \
     update, insert, delete, c, cs
+from . import TableName
 import json
 from time import time
 import re
 import asyncio
+from typing import Optional, List, Dict, Any, Callable
 
 op_map = {
     'gt': '>',
@@ -24,7 +26,7 @@ re_op = re.compile('_(' + '|'.join(op_map.keys()) + ')$')
 re_num = re.compile(r'^\d+(.\d+)?$')
 
 
-def merge_json(new, old):
+def merge_json(new: Any, old: Any) -> Any:
     if isinstance(new, dict) and isinstance(old, dict):
         old.update(new)
         return old
@@ -32,7 +34,9 @@ def merge_json(new, old):
     return new
 
 
-def merge_sub_json(data0, data1, replace_keys=[]):
+def merge_sub_json(data0: Any,
+                   data1: Any,
+                   replace_keys: List[str] = []) -> Any:
     for k, v in data1.items():
         if k not in replace_keys:
             new = data0.get(k)
@@ -44,7 +48,11 @@ def merge_sub_json(data0, data1, replace_keys=[]):
     return data0
 
 
-def append_extra(part_sql, args, data):
+def append_extra(
+    part_sql: List[str],
+    args: List[Any],
+    data: Dict[str, Any],
+) -> None:
     for key, val in data.items():
         if val is None:
             continue
@@ -52,16 +60,18 @@ def append_extra(part_sql, args, data):
         args.append(val)
 
 
-async def get(table,
-              *,
-              id=None,
-              uniq_keys=[],
-              optional_keys=[],
-              required_uniq_keys=True,
-              ignore_extra_keys=False,
-              fields=['*'],
-              popup=False,
-              **data):
+async def get(
+    table: TableName,
+    *,
+    id: Optional[int] = None,
+    uniq_keys: List[str] = [],
+    optional_keys: List[str] = [],
+    required_uniq_keys: bool = True,
+    ignore_extra_keys: bool = False,
+    fields: List[str] = ['*'],
+    popup: bool = False,
+    **data: Any,
+) -> Any:
 
     part_sql = []
     args = []
@@ -93,10 +103,9 @@ async def get(table,
             if not ignore_extra_keys:
                 append_extra(part_sql, args, data)
 
-            part_sql = ' AND '.join(part_sql)
-            args = tuple(args)
-
-            id = await select_one_only(table, c('max(id)'), part_sql, args)
+            part_sql_s = ' AND '.join(part_sql)
+            id = await select_one_only(table, c('max(id)'), part_sql_s,
+                                       tuple(args))
             if not id:
                 return None
 
@@ -106,9 +115,8 @@ async def get(table,
     if not ignore_extra_keys:
         append_extra(part_sql, args, data)
 
-    part_sql = ' AND '.join(part_sql)
-    args = tuple(args)
-    ret = await select_one(table, cs(fields), part_sql, args)
+    part_sql_s = ' AND '.join(part_sql)
+    ret = await select_one(table, cs(fields), part_sql_s, tuple(args))
 
     if popup:
         return popup_data(ret)
@@ -116,23 +124,25 @@ async def get(table,
     return ret
 
 
-async def save(table,
-               *,
-               id=None,
-               keys=[],
-               uniq_keys=[],
-               optional_keys=[],
-               json_keys=[],
-               sub_json_keys=[],
-               replace_keys=[],
-               exclude_data_keys=[],
-               on_saved=None,
-               **data):
+async def save(
+    table: TableName,
+    *,
+    id: Optional[int] = None,
+    keys: List[str] = [],
+    uniq_keys: List[str] = [],
+    optional_keys: List[str] = [],
+    json_keys: List[str] = [],
+    sub_json_keys: List[str] = [],
+    replace_keys: List[str] = [],
+    exclude_data_keys: List[str] = [],
+    on_saved: Optional[Callable[[Any, int], Any]] = None,
+    **data: Any,
+) -> Any:
 
     if len(exclude_data_keys) > 0:
         data = make_data(data.copy(), exclude_data_keys)
 
-    uniq_data = {}
+    uniq_data: Dict[str, Any] = {}
 
     for key in uniq_keys:
         uniq_data[key] = data.get(key)
@@ -238,7 +248,10 @@ async def save(table,
         return nid
 
 
-async def remove(table, *args, on_removed=None, **kwargs):
+async def remove(table: TableName,
+                 *args: Any,
+                 on_removed: Optional[Callable[[Any], Any]] = None,
+                 **kwargs: Any) -> bool:
     fields = ['*'] if on_removed else ['id']
 
     old = await get(table,
@@ -257,7 +270,12 @@ async def remove(table, *args, on_removed=None, **kwargs):
     return False
 
 
-def format_key(key, val, json_keys=[], keys=[]):
+def format_key(
+    key: str,
+    val: Any,
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> str:
     if key.find('.') == -1:
         if len(keys) == 0:
             return key
@@ -317,7 +335,13 @@ def format_key(key, val, json_keys=[], keys=[]):
     return out
 
 
-def append_query(query, key, val, json_keys=[], keys=[]):
+def append_query(
+    query: List[tuple[str, str, Any]],
+    key: str,
+    val: Any,
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> None:
     if val is None:
         return
 
@@ -343,7 +367,10 @@ def append_query(query, key, val, json_keys=[], keys=[]):
         query.append((key, f'{fkey}{op}%s', val))
 
 
-def sort_query(query, sort_keys):
+def sort_query(
+    query: List[tuple[str, str, Any]],
+    sort_keys: List[str],
+) -> List[tuple[str, str, Any]]:
     ret = []
     for key in sort_keys:
         other = []
@@ -358,7 +385,9 @@ def sort_query(query, sort_keys):
     return ret + query
 
 
-def record_query_to_sql(query, part_sql='', args=()):
+def record_query_to_sql(query: List[tuple[str, str, Any]],
+                        part_sql: str = '',
+                        args: Any = ()) -> tuple[str, Any]:
     new_part_sql = []
     new_args = []
     for q in query:
@@ -378,8 +407,15 @@ def record_query_to_sql(query, part_sql='', args=()):
     return ' AND '.join(new_part_sql), tuple(new_args)
 
 
-def gen_query(*args, sort_keys=[], part_sql='', json_keys=[], keys=[], **data):
-    query = []
+def gen_query(
+    *args: Any,
+    sort_keys: List[str] = [],
+    part_sql: str = '',
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+    **data: Any,
+) -> tuple[str, Any]:
+    query: List[tuple[str, str, Any]] = []
     for key, val in data.items():
         append_query(query, key, val, json_keys=json_keys, keys=keys)
 
@@ -388,33 +424,33 @@ def gen_query(*args, sort_keys=[], part_sql='', json_keys=[], keys=[], **data):
     return record_query_to_sql(query, part_sql, args)
 
 
-async def count(table,
-                *args,
-                field='*',
-                join_sql='',
-                groups=None,
-                sorts=None,
-                **kwargs):
+async def count(
+    table: TableName,
+    *args: Any,
+    field: str = '*',
+    join_sql: str = '',
+    groups: Optional[str] = None,
+    **kwargs: Any,
+) -> Any:
     part_sql, args = gen_query(*args, **kwargs)
     return await pg_count(table,
                           part_sql,
                           args,
                           column=c(field),
                           join_sql=join_sql,
-                          groups=groups,
-                          sorts=sorts)
+                          groups=groups)
 
 
-async def get_list(table,
-                   *args,
-                   offset=None,
-                   size=None,
-                   fields=['*'],
-                   popup=False,
-                   join_sql='',
-                   groups=None,
-                   sorts='id desc',
-                   **kwargs):
+async def get_list(table: TableName,
+                   *args: Any,
+                   offset: Optional[int] = None,
+                   size: Optional[int] = None,
+                   fields: List[str] = ['*'],
+                   popup: bool = False,
+                   join_sql: str = '',
+                   groups: Optional[str] = None,
+                   sorts: Optional[str] = 'id desc',
+                   **kwargs: Any) -> Any:
 
     part_sql, args = gen_query(*args, **kwargs)
     ret = await select(table,
@@ -433,7 +469,7 @@ async def get_list(table,
     return ret
 
 
-def popup_data(ret):
+def popup_data(ret: Any) -> Any:
     if isinstance(ret, dict):
         data = ret.pop('data', None)
 
@@ -444,7 +480,7 @@ def popup_data(ret):
     return ret
 
 
-def make_data(data, exclude_data_keys=[]):
+def make_data(data: Any, exclude_data_keys: List[str] = []) -> Any:
     new = {}
 
     for k in exclude_data_keys:

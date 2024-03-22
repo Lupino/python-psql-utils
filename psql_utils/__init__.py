@@ -1,26 +1,37 @@
 import aiopg
+from aiopg import Cursor, Pool
 
 from functools import wraps
 from psycopg2.extras import DictCursor
+from typing import Optional, List, Dict, Any, Callable, Coroutine
+from mypy_extensions import KwArg, VarArg
 
 
 class TableName(object):
+    table_name: str
+    alias_name: str | None
+    joins: List['LeftJoin']
 
-    def __init__(self, table_name, alias=None, joins=[]):
+    def __init__(
+        self,
+        table_name: str,
+        alias: Optional[str] = None,
+        joins: List['LeftJoin'] = [],
+    ) -> None:
         self.table_name = table_name
         self.alias_name = alias
         self.joins = joins
 
-    def alias(self, alias):
+    def alias(self, alias: str) -> 'TableName':
         return TableName(self.table_name, alias, self.joins[:])
 
-    def join(self, table, where):
+    def join(self, table: 'TableName', where: str) -> 'TableName':
         joins = self.joins[:]
         joins.append(LeftJoin(table, where))
 
         return TableName(self.table_name, self.alias_name, joins)
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.alias_name is None:
             table_name = f'"{self.table_name}"'
         else:
@@ -33,76 +44,78 @@ class TableName(object):
 
 
 class LeftJoin(object):
+    table_name: TableName
+    where: str
 
-    def __init__(self, table_name, where):
+    def __init__(self, table_name: TableName, where: str) -> None:
         self.table_name = table_name
         self.where = where
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'''LEFT JOIN {str(self.table_name)} ON {self.where} '''
 
 
-def get_table_name(table_name):
+def get_table_name(table_name: List[TableName] | TableName) -> str:
     if isinstance(table_name, list):
         return ', '.join([str(tn) for tn in table_name])
 
     return str(table_name)
 
 
-def t(table_name):
+def t(table_name: str) -> TableName:
     return TableName(table_name)
 
 
 class Column(object):
+    column: str
 
-    def __init__(self, column):
+    def __init__(self, column: str) -> None:
         self.column = column
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.column
 
 
-def c(column):
+def c(column: str) -> Column:
     return Column(column)
 
 
 c_all = c('*')
 
 
-def cs(columns):
+def cs(columns: List[str]) -> List[Column]:
     return [c(x) for x in columns]
 
 
 cs_all = cs(['*'])
 
 
-def columns_to_string(columns):
+def columns_to_string(columns: List[Column]) -> str:
     return ', '.join([str(x) for x in columns])
 
 
 class IndexName(object):
+    index_name: str
 
-    def __init__(self, index_name):
+    def __init__(self, index_name: str) -> None:
         self.index_name = index_name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.index_name
 
 
-def i(index_name):
+def i(index_name: str) -> IndexName:
     return IndexName(index_name)
 
 
-def get_index_name(table_name, index_name):
+def get_index_name(table_name: TableName, index_name: IndexName) -> str:
     return '"{}_{}"'.format(table_name.table_name, index_name.index_name)
 
 
-def constraint_primary_key(table_name, columns):
+def constraint_primary_key(table_name: TableName,
+                           columns: List[Column]) -> Column:
     return Column('CONSTRAINT {} PRIMARY KEY ({})'.format(
         get_index_name(table_name, i('pk')), columns_to_string(columns)))
-
-
-_connector = None
 
 
 class PGConnnectorError(Exception):
@@ -110,17 +123,22 @@ class PGConnnectorError(Exception):
 
 
 class PGConnnector():
+    config: Dict[str, Any]
+    pool: Pool | None
 
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.pool = None
 
-    def get(self):
+    def get(self) -> Pool:
+        if not self.pool:
+            raise PGConnnectorError('no connected')
         return self.pool
 
-    async def connect(self):
+    async def connect(self) -> bool:
         try:
-            self.pool.close()
+            if self.pool:
+                self.pool.close()
         except Exception:
             pass
 
@@ -129,19 +147,24 @@ class PGConnnector():
         return True
 
 
-def get_connector():
+_connector: PGConnnector | None = None
+
+
+def get_connector() -> PGConnnector:
+    if not _connector:
+        raise PGConnnectorError('not connected')
     return _connector
 
 
-_connected_events = []
+_connected_events: List[Callable[[], Coroutine[Any, Any, Any]]] = []
 
 
-def on_connected(func):
+def on_connected(func: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
     global _connected_events
     _connected_events.append(func)
 
 
-async def connect(config):
+async def connect(config: Any) -> bool:
     global _connector
     _connector = PGConnnector(config)
 
@@ -153,7 +176,7 @@ async def connect(config):
     return False
 
 
-async def close():
+async def close() -> None:
     if not _connector:
         return
     pool = _connector.get()
@@ -161,12 +184,45 @@ async def close():
     await pool.wait_closed()
 
 
-def run_with_pool(cursor_factory=None):
+def run_with_pool(
+    cursor_factory: Any = None
+) -> Callable[
+    [
+        Callable[
+            [
+                VarArg(Any),
+                KwArg(Any),
+            ],
+            Coroutine[Any, Any, Any],
+        ],
+    ],
+        Callable[
+            [
+                VarArg(Any),
+                KwArg(Any),
+            ],
+            Coroutine[Any, Any, Any],
+        ],
+]:
 
-    def decorator(f):
+    def decorator(
+        f: Callable[
+            [
+                VarArg(Any),
+                KwArg(Any),
+            ],
+            Coroutine[Any, Any, Any],
+        ]
+    ) -> Callable[
+        [
+            VarArg(Any),
+            KwArg(Any),
+        ],
+            Coroutine[Any, Any, Any],
+    ]:
 
         @wraps(f)
-        async def run(*args, cur=None, **kwargs):
+        async def run(*args: Any, cur: Any = None, **kwargs: Any) -> Any:
             if _connector is None:
                 raise PGConnnectorError('not connected')
 
@@ -198,21 +254,35 @@ def run_with_pool(cursor_factory=None):
 
 
 @run_with_pool()
-async def create_table(cur, table_name, columns):
+async def create_table(
+    cur: Cursor,
+    table_name: TableName,
+    columns: List[Column],
+) -> None:
     await fixed_execute(
         cur, 'CREATE TABLE IF NOT EXISTS {} ({})'.format(
             get_table_name(table_name), columns_to_string(columns)))
 
 
 @run_with_pool()
-async def add_table_column(cur, table_name, columns):
+async def add_table_column(
+    cur: Cursor,
+    table_name: TableName,
+    columns: List[Column],
+) -> None:
     await fixed_execute(
         cur, 'ALTER TABLE {} ADD COLUMN {}'.format(get_table_name(table_name),
                                                    columns_to_string(columns)))
 
 
 @run_with_pool()
-async def create_index(cur, uniq, table_name, index_name, columns):
+async def create_index(
+    cur: Cursor,
+    uniq: str,
+    table_name: TableName,
+    index_name: IndexName,
+    columns: List[Column],
+) -> None:
     uniq_word = 'UNIQUE ' if uniq else ''
     await fixed_execute(
         cur, 'CREATE {}INDEX IF NOT EXISTS {} ON {} ({})'.format(
@@ -220,7 +290,7 @@ async def create_index(cur, uniq, table_name, index_name, columns):
             get_table_name(table_name), columns_to_string(columns)))
 
 
-async def get_only_default(cur, default):
+async def get_only_default(cur: Cursor, default: Any) -> Any:
     ret = await cur.fetchone()
     if ret is None:
         return default
@@ -231,12 +301,14 @@ async def get_only_default(cur, default):
 
 
 @run_with_pool()
-async def insert(cur,
-                 table_name,
-                 columns,
-                 args,
-                 ret_column=None,
-                 ret_def=None):
+async def insert(
+    cur: Cursor,
+    table_name: TableName,
+    columns: List[Column],
+    args: Any,
+    ret_column: Optional[Column] = None,
+    ret_def: Optional[Any] = None,
+) -> Any:
     v = [Column('%s') for x in columns]
     ret_sql = ' returning {}'.format(ret_column) if ret_column else ''
     await fixed_execute(
@@ -250,7 +322,7 @@ async def insert(cur,
         return await get_only_default(cur, ret_def)
 
 
-def append_excluded_set(column):
+def append_excluded_set(column: Column) -> str:
     col = str(column)
     if col.find('=') > -1:
         return col
@@ -258,12 +330,14 @@ def append_excluded_set(column):
 
 
 @run_with_pool()
-async def insert_or_update(cur,
-                           table_name,
-                           uniq_columns,
-                           value_columns=[],
-                           other_columns=[],
-                           args=()):
+async def insert_or_update(
+        cur: Cursor,
+        table_name: TableName,
+        uniq_columns: List[Column],
+        value_columns: List[Column] = [],
+        other_columns: List[Column] = [],
+        args: Any = (),
+) -> Any:
     cols = uniq_columns + value_columns + other_columns
     v = [Column('%s') for x in cols]
     set_sql = ', '.join([append_excluded_set(x) for x in value_columns])
@@ -276,7 +350,7 @@ async def insert_or_update(cur,
     await fixed_execute(cur, sql, args)
 
 
-def append_update_set(column):
+def append_update_set(column: Column) -> str:
     col = str(column)
     if col.find('=') > -1:
         return col
@@ -284,7 +358,13 @@ def append_update_set(column):
 
 
 @run_with_pool()
-async def update(cur, table_name, columns, part_sql="", args=()):
+async def update(
+        cur: Cursor,
+        table_name: TableName,
+        columns: List[Column],
+        part_sql: str = '',
+        args: Any = (),
+) -> None:
     set_sql = ', '.join([append_update_set(x) for x in columns])
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     sql = "UPDATE {} SET {}{}".format(get_table_name(table_name), set_sql,
@@ -293,19 +373,26 @@ async def update(cur, table_name, columns, part_sql="", args=()):
 
 
 @run_with_pool()
-async def delete(cur, table_name, part_sql="", args=()):
+async def delete(
+        cur: Cursor,
+        table_name: TableName,
+        part_sql: str = '',
+        args: Any = (),
+) -> None:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     sql = 'DELETE FROM {}{}'.format(get_table_name(table_name), where_sql)
     await fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
-async def sum(cur,
-              table_name,
-              part_sql="",
-              args=(),
-              column=c('*'),
-              join_sql=''):
+async def sum(
+        cur: Cursor,
+        table_name: TableName,
+        part_sql: str = '',
+        args: Any = (),
+        column: Column = c('*'),
+        join_sql: str = '',
+) -> Any:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
     sql = 'SELECT sum({}) FROM {}{}{}'.format(str(column),
@@ -316,14 +403,15 @@ async def sum(cur,
 
 
 @run_with_pool()
-async def count(cur,
-                table_name,
-                part_sql="",
-                args=(),
-                column=c('*'),
-                join_sql='',
-                groups=None,
-                sorts=None):
+async def count(
+    cur: Cursor,
+    table_name: TableName,
+    part_sql: str = '',
+    args: Any = (),
+    column: Column = c('*'),
+    join_sql: str = '',
+    groups: Optional[str] = None,
+) -> Any:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
     sql = 'SELECT count({}) FROM {}{}{}{}'.format(
@@ -331,23 +419,25 @@ async def count(cur,
         get_table_name(table_name),
         join_sql,
         where_sql,
-        format_group_and_sort_sql(groups, sorts),
+        format_group_and_sort_sql(groups, None),
     )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
 
 @run_with_pool(cursor_factory=DictCursor)
-async def select(cur,
-                 table_name,
-                 columns,
-                 part_sql='',
-                 args=(),
-                 offset=None,
-                 size=None,
-                 groups=None,
-                 sorts=None,
-                 join_sql=''):
+async def select(
+    cur: Cursor,
+    table_name: TableName,
+    columns: List[Column],
+    part_sql: str = '',
+    args: Any = (),
+    offset: Optional[int] = None,
+    size: Optional[int] = None,
+    groups: Optional[str] = None,
+    sorts: Optional[str] = None,
+    join_sql: str = '',
+) -> Any:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
     limit_sql = '' if size is None else ' LIMIT {}'.format(size)
@@ -366,15 +456,17 @@ async def select(cur,
     return [dict(x) for x in ret]
 
 
-async def select_only(table_name,
-                      column,
-                      part_sql='',
-                      args=(),
-                      offset=None,
-                      size=None,
-                      groups=None,
-                      sorts=None,
-                      join_sql=''):
+async def select_only(
+    table_name: TableName,
+    column: Column,
+    part_sql: str = '',
+    args: Any = (),
+    offset: Optional[int] = None,
+    size: Optional[int] = None,
+    groups: Optional[str] = None,
+    sorts: Optional[str] = None,
+    join_sql: str = '',
+) -> Any:
     ret = await select(
         table_name,
         [column],
@@ -390,12 +482,14 @@ async def select_only(table_name,
 
 
 @run_with_pool(cursor_factory=DictCursor)
-async def select_one(cur,
-                     table_name,
-                     columns,
-                     part_sql='',
-                     args=(),
-                     join_sql=''):
+async def select_one(
+        cur: Cursor,
+        table_name: TableName,
+        columns: List[Column],
+        part_sql: str = '',
+        args: Any = (),
+        join_sql: str = '',
+) -> Any:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     join_sql = ' {} '.format(join_sql) if join_sql else ''
     sql = "SELECT {} FROM {}{}{} LIMIT 1".format(columns_to_string(columns),
@@ -408,11 +502,13 @@ async def select_one(cur,
     return None
 
 
-async def select_one_only(table_name,
-                          column,
-                          part_sql='',
-                          args=(),
-                          join_sql=''):
+async def select_one_only(
+        table_name: TableName,
+        column: Column,
+        part_sql: str = '',
+        args: Any = (),
+        join_sql: str = '',
+) -> Any:
     ret = await select_one(table_name, [column], part_sql, args, join_sql)
     if ret:
         return list(ret.values())[0]
@@ -421,12 +517,12 @@ async def select_one_only(table_name,
 
 
 @run_with_pool()
-async def drop_table(cur, table_name):
-    await fixed_execute(cur,
-                        'drop table {}'.format(get_table_name(table_name)))
+async def drop_table(cur: Cursor, table_name: TableName) -> None:
+    name = get_table_name(table_name)
+    await fixed_execute(cur, f'drop table {name}')
 
 
-def gen_ordering_sql(column, arr):
+def gen_ordering_sql(column: Column, arr: List[Any]) -> tuple[str, str]:
     ret = []
     for ordering, a in enumerate(arr):
         ret.append('({}, {})'.format(a, ordering))
@@ -436,13 +532,15 @@ def gen_ordering_sql(column, arr):
 
 
 @run_with_pool()
-async def group_count(cur,
-                      table_name,
-                      columns,
-                      part_sql='',
-                      args=(),
-                      groups=None,
-                      sorts=None):
+async def group_count(
+    cur: Cursor,
+    table_name: TableName,
+    columns: List[Column],
+    part_sql: str = '',
+    args: Any = (),
+    groups: Optional[str] = None,
+    sorts: Optional[str] = None,
+) -> Any:
     where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
     sql = "SELECT COUNT(*) FROM (SELECT {} FROM {}{}{}) G".format(
         columns_to_string(columns),
@@ -454,14 +552,14 @@ async def group_count(cur,
     return await get_only_default(cur, 0)
 
 
-def fixed_execute(cur, sql, args=None):
+def fixed_execute(cur: Cursor, sql: str, args: Any = None) -> Any:
     if args and len(args) > 0:
         return cur.execute(sql, args)
     else:
         return cur.execute(sql)
 
 
-def format_group_and_sort_sql(groups, sorts):
+def format_group_and_sort_sql(groups: str | None, sorts: str | None) -> str:
     group_sql = f' GROUP BY {groups}' if groups else ''
     sort_sql = f' ORDER BY {sorts}' if sorts else ''
     return group_sql + sort_sql
