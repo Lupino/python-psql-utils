@@ -194,16 +194,22 @@ async def save(
 
     if old:
         uniq_changed = False
+        uniq_full_data = {}
         if id:
             for key in uniq_keys:
                 val = data.get(key)
-                if val is not None:
-                    if old[key] == val:
-                        continue
 
-                    rkeys.append(key)
-                    args.append(val)
-                    uniq_changed = True
+                if val is None:
+                    val = old[key]
+
+                uniq_full_data[key] = val
+
+                if old[key] == val:
+                    continue
+
+                rkeys.append(key)
+                args.append(val)
+                uniq_changed = True
 
         if uniq_changed:
             old1 = await get(table,
@@ -211,7 +217,7 @@ async def save(
                              optional_keys=optional_keys,
                              required_uniq_keys=True,
                              ignore_extra_keys=True,
-                             **uniq_data)
+                             **uniq_full_data)
             if old1:
                 oid = old1['id']
                 err = f'cant update record uniq value to exists value {oid}'
