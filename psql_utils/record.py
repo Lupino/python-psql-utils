@@ -25,6 +25,8 @@ op_map = {
 re_op = re.compile('_(' + '|'.join(op_map.keys()) + ')$')
 re_num = re.compile(r'^\d+(.\d+)?$')
 
+IGNORE = '__IGNORE__'
+
 
 def merge_json(new: Any, old: Any) -> Any:
     if isinstance(new, dict) and isinstance(old, dict):
@@ -366,8 +368,11 @@ def append_query(
         op = op_map[op]
 
     if op.strip() == 'in':
-        val = [x.strip() for x in val.split(',')]
-        append_query(query, key, val, json_keys=json_keys, keys=keys)
+        if val.lower().find('select') > -1:
+            query.append((key, f'{key}{op}({val})', IGNORE))
+        else:
+            val = [x.strip() for x in val.split(',')]
+            append_query(query, key, val, json_keys=json_keys, keys=keys)
     else:
         fkey = format_key(key, val, json_keys=json_keys, keys=keys)
         query.append((key, f'{fkey}{op}%s', val))
@@ -401,6 +406,8 @@ def record_query_to_sql(query: List[tuple[str, str, Any]],
         if isinstance(q[2], list):
             new_args += q[2]
         else:
+            if q[2] == IGNORE:
+                continue
             new_args.append(q[2])
 
     if part_sql:
