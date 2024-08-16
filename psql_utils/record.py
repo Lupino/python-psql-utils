@@ -28,6 +28,10 @@ re_num = re.compile(r'^\d+(.\d+)?$')
 IGNORE = '__IGNORE__'
 
 
+class EmptyRows(Exception):
+    pass
+
+
 def merge_json(new: Any, old: Any) -> Any:
     if isinstance(new, dict) and isinstance(old, dict):
         old.update(new)
@@ -355,6 +359,8 @@ def append_query(
 
     if isinstance(val, list):
         vs = ['%s' for x in val]
+        if len(val) == 0:
+            raise EmptyRows()
         fkey = format_key(key, val[0], json_keys=json_keys, keys=keys)
         query.append((key, f'{fkey} in (' + ', '.join(vs) + ')', val))
         return
@@ -465,7 +471,11 @@ async def get_list(table: TableName,
                    sorts: Optional[str] = 'id desc',
                    **kwargs: Any) -> Any:
 
-    part_sql, args = gen_query(*args, **kwargs)
+    try:
+        part_sql, args = gen_query(*args, **kwargs)
+    except EmptyRows:
+        return []
+
     ret = await select(table,
                        cs(fields),
                        part_sql,
