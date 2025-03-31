@@ -347,6 +347,44 @@ def format_key(
     return out
 
 
+def format_groups(
+    groups: str | None,
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> str | None:
+    if not groups:
+        return groups
+
+    keys = groups.split(',')
+
+    retval = []
+
+    for key in keys:
+        fkey = format_key(key.strip(), None, json_keys=json_keys, keys=keys)
+        retval.append(fkey)
+
+    return ','.join(retval)
+
+
+def format_sorts(
+    sorts: str | None,
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> str | None:
+    if not sorts:
+        return sorts
+
+    idx = sorts.rfind(' ')
+
+    if idx == -1:
+        return format_groups(sorts, json_keys=json_keys, keys=keys)
+
+    fsorts = format_groups(sorts[:idx], json_keys=json_keys, keys=keys)
+    if not fsorts:
+        return fsorts
+    return fsorts + sorts[idx:]
+
+
 def append_query(
     query: List[tuple[str, str, Any]],
     key: str,
@@ -451,40 +489,55 @@ async def count(
     groups: Optional[str] = None,
     **kwargs: Any,
 ) -> Any:
+    json_keys = kwargs.get('json_keys', [])
+    keys = kwargs.get('keys', [])
+
+    groups = format_groups(groups, json_keys=json_keys, keys=keys)
     part_sql, args = gen_query(*args, **kwargs)
-    return await pg_count(table,
-                          part_sql,
-                          args,
-                          column=c(field),
-                          join_sql=join_sql,
-                          groups=groups)
+    return await pg_count(
+        table,
+        part_sql,
+        args,
+        column=c(field),
+        join_sql=join_sql,
+        groups=groups,
+    )
 
 
-async def get_list(table: TableName,
-                   *args: Any,
-                   offset: Optional[int] = None,
-                   size: Optional[int] = None,
-                   fields: List[str] = ['*'],
-                   popup: bool = False,
-                   join_sql: str = '',
-                   groups: Optional[str] = None,
-                   sorts: Optional[str] = 'id desc',
-                   **kwargs: Any) -> Any:
+async def get_list(
+    table: TableName,
+    *args: Any,
+    offset: Optional[int] = None,
+    size: Optional[int] = None,
+    fields: List[str] = ['*'],
+    popup: bool = False,
+    join_sql: str = '',
+    groups: Optional[str] = None,
+    sorts: Optional[str] = 'id desc',
+    **kwargs: Any,
+) -> Any:
 
     try:
         part_sql, args = gen_query(*args, **kwargs)
     except EmptyRows:
         return []
 
-    ret = await select(table,
-                       cs(fields),
-                       part_sql,
-                       args,
-                       offset=offset,
-                       size=size,
-                       join_sql=join_sql,
-                       groups=groups,
-                       sorts=sorts)
+    json_keys = kwargs.get('json_keys', [])
+    keys = kwargs.get('keys', [])
+
+    sorts = format_sorts(sorts, json_keys=json_keys, keys=keys)
+    groups = format_groups(groups, json_keys=json_keys, keys=keys)
+    ret = await select(
+        table,
+        cs(fields),
+        part_sql,
+        args,
+        offset=offset,
+        size=size,
+        join_sql=join_sql,
+        groups=groups,
+        sorts=sorts,
+    )
 
     if popup:
         return [popup_data(v) for v in ret]
