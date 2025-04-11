@@ -356,6 +356,20 @@ def format_key(
     return out
 
 
+def format_fields(
+    fields: List[str],
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> List[str]:
+    retval = []
+
+    for key in fields:
+        fkey = format_key(key.strip(), None, json_keys=json_keys, keys=keys)
+        retval.append(fkey)
+
+    return retval
+
+
 def format_groups(
     groups: str | None,
     json_keys: List[str] = [],
@@ -364,13 +378,7 @@ def format_groups(
     if not groups:
         return groups
 
-    keys = groups.split(',')
-
-    retval = []
-
-    for key in keys:
-        fkey = format_key(key.strip(), None, json_keys=json_keys, keys=keys)
-        retval.append(fkey)
+    retval = format_fields(groups.split(','), json_keys=json_keys, keys=keys)
 
     return ','.join(retval)
 
@@ -536,6 +544,7 @@ async def get_list(
 
     sorts = format_sorts(sorts, json_keys=json_keys, keys=keys)
     groups = format_groups(groups, json_keys=json_keys, keys=keys)
+    fields = format_fields(fields, json_keys=json_keys, keys=keys)
     ret = await select(
         table,
         cs(fields),
