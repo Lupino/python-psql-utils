@@ -329,11 +329,6 @@ def format_key(
     keys = key.split('.')
     json_types = ['int', 'float', 'boolean', 'text']
 
-    tp = ''
-    if keys[-1] in json_types:
-        tp = keys[-1]
-        keys = keys[:-1]
-
     prefix = ''
 
     if keys[0] in json_keys:
@@ -345,6 +340,17 @@ def format_key(
     else:
         return key
 
+    tp = ''
+    if keys[-1] in json_types:
+        tp = keys[-1]
+        keys = keys[:-1]
+
+    asName = ''
+
+    if 'as' in keys:
+        asName = keys[-1]
+        keys = keys[:-2]
+
     out = prefix + "#>>'{" + ', '.join(keys) + "}'"
 
     if not tp:
@@ -352,6 +358,9 @@ def format_key(
 
     if tp:
         out = f'cast({out} as {tp})'
+
+    if asName:
+        out = f'{out} as {asName}'
 
     return out
 
