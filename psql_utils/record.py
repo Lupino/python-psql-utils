@@ -282,6 +282,32 @@ async def remove(table: TableName,
     return False
 
 
+def guess_type(val: Any) -> str:
+    if isinstance(val, bytes):
+        val = str(val, 'utf-8')
+
+    if isinstance(val, str):
+        if re_num.search(val):
+            if val.isdigit():
+                return 'int'
+            return 'float'
+
+        l_val = val.lower()
+        if l_val == 'true' or l_val == 'false':
+            return 'boolean'
+
+    if isinstance(val, int):
+        return 'int'
+
+    if isinstance(val, float):
+        return 'float'
+
+    if isinstance(val, bool):
+        return 'boolean'
+
+    return ''
+
+
 def format_key(
     key: str,
     val: Any,
@@ -301,6 +327,12 @@ def format_key(
         return format_key('data.' + key, val, json_keys=json_keys, keys=keys)
 
     keys = key.split('.')
+    json_types = ['int', 'float', 'boolean', 'text']
+
+    tp = ''
+    if keys[-1] in json_types:
+        tp = keys[-1]
+        keys = keys[:-1]
 
     prefix = ''
 
@@ -315,31 +347,8 @@ def format_key(
 
     out = prefix + "#>>'{" + ', '.join(keys) + "}'"
 
-    tp = ''
-
-    if isinstance(val, bytes):
-        val = str(val, 'utf-8')
-
-    if isinstance(val, str):
-        if re_num.search(val):
-            if val.isdigit():
-                tp = 'int'
-            else:
-                tp = 'float'
-
-        else:
-            l_val = val.lower()
-            if l_val == 'true' or l_val == 'false':
-                tp = 'boolean'
-
-    if isinstance(val, int):
-        tp = 'int'
-
-    if isinstance(val, float):
-        tp = 'float'
-
-    if isinstance(val, bool):
-        tp = 'boolean'
+    if not tp:
+        tp = guess_type(val)
 
     if tp:
         out = f'cast({out} as {tp})'
