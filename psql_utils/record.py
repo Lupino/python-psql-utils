@@ -287,23 +287,23 @@ def guess_type(val: Any) -> str:
         val = str(val, 'utf-8')
 
     if isinstance(val, str):
+        l_val = val.lower()
+        if l_val == 'true' or l_val == 'false':
+            return 'boolean'
+
         if re_num.search(val):
             if val.isdigit():
                 return 'int'
             return 'float'
 
-        l_val = val.lower()
-        if l_val == 'true' or l_val == 'false':
-            return 'boolean'
+    if isinstance(val, bool):
+        return 'boolean'
 
     if isinstance(val, int):
         return 'int'
 
     if isinstance(val, float):
         return 'float'
-
-    if isinstance(val, bool):
-        return 'boolean'
 
     return ''
 
