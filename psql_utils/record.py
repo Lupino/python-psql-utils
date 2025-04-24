@@ -314,6 +314,9 @@ def format_key(
     json_keys: List[str] = [],
     keys: List[str] = [],
 ) -> str:
+    if key == '*':
+        return key
+
     if key.find('.') == -1:
         if len(keys) == 0:
             return key
