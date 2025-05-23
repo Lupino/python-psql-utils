@@ -6,116 +6,12 @@ from psycopg2.extras import DictCursor
 from typing import Optional, List, Dict, Any, Callable, Coroutine
 from mypy_extensions import KwArg, VarArg
 
+from .types import TableName, LeftJoin, Column, IndexName, \
+    t, c, c_all, cs, cs_all, i, \
+    get_table_name, columns_to_string, get_index_name, \
+    constraint_primary_key # noqa
 
-class TableName(object):
-    table_name: str
-    alias_name: str | None
-    joins: List['LeftJoin']
-
-    def __init__(
-        self,
-        table_name: str,
-        alias: Optional[str] = None,
-        joins: List['LeftJoin'] = [],
-    ) -> None:
-        self.table_name = table_name
-        self.alias_name = alias
-        self.joins = joins
-
-    def alias(self, alias: str) -> 'TableName':
-        return TableName(self.table_name, alias, self.joins[:])
-
-    def join(self, table: 'TableName', where: str) -> 'TableName':
-        joins = self.joins[:]
-        joins.append(LeftJoin(table, where))
-
-        return TableName(self.table_name, self.alias_name, joins)
-
-    def __str__(self) -> str:
-        if self.alias_name is None:
-            table_name = f'"{self.table_name}"'
-        else:
-            table_name = f'"{self.table_name}" AS {self.alias_name}'
-
-        if len(self.joins) > 0:
-            table_name += ' ' + ' '.join([str(join) for join in self.joins])
-
-        return table_name
-
-
-class LeftJoin(object):
-    table_name: TableName
-    where: str
-
-    def __init__(self, table_name: TableName, where: str) -> None:
-        self.table_name = table_name
-        self.where = where
-
-    def __str__(self) -> str:
-        return f'''LEFT JOIN {str(self.table_name)} ON {self.where} '''
-
-
-def get_table_name(table_name: List[TableName] | TableName) -> str:
-    if isinstance(table_name, list):
-        return ', '.join([str(tn) for tn in table_name])
-
-    return str(table_name)
-
-
-def t(table_name: str) -> TableName:
-    return TableName(table_name)
-
-
-class Column(object):
-    column: str
-
-    def __init__(self, column: str) -> None:
-        self.column = column
-
-    def __str__(self) -> str:
-        return self.column
-
-
-def c(column: str) -> Column:
-    return Column(column)
-
-
-c_all = c('*')
-
-
-def cs(columns: List[str]) -> List[Column]:
-    return [c(x) for x in columns]
-
-
-cs_all = cs(['*'])
-
-
-def columns_to_string(columns: List[Column]) -> str:
-    return ', '.join([str(x) for x in columns])
-
-
-class IndexName(object):
-    index_name: str
-
-    def __init__(self, index_name: str) -> None:
-        self.index_name = index_name
-
-    def __str__(self) -> str:
-        return self.index_name
-
-
-def i(index_name: str) -> IndexName:
-    return IndexName(index_name)
-
-
-def get_index_name(table_name: TableName, index_name: IndexName) -> str:
-    return '"{}_{}"'.format(table_name.table_name, index_name.index_name)
-
-
-def constraint_primary_key(table_name: TableName,
-                           columns: List[Column]) -> Column:
-    return Column('CONSTRAINT {} PRIMARY KEY ({})'.format(
-        get_index_name(table_name, i('pk')), columns_to_string(columns)))
+from . import gen_sql as gen
 
 
 class PGConnnectorError(Exception):
@@ -160,7 +56,6 @@ _connected_events: List[Callable[[], Coroutine[Any, Any, Any]]] = []
 
 
 def on_connected(func: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
-    global _connected_events
     _connected_events.append(func)
 
 
@@ -259,9 +154,7 @@ async def create_table(
     table_name: TableName,
     columns: List[Column],
 ) -> None:
-    await fixed_execute(
-        cur, 'CREATE TABLE IF NOT EXISTS {} ({})'.format(
-            get_table_name(table_name), columns_to_string(columns)))
+    await fixed_execute(cur, gen.gen_create_table(table_name, columns))
 
 
 @run_with_pool()
@@ -270,9 +163,7 @@ async def add_table_column(
     table_name: TableName,
     columns: List[Column],
 ) -> None:
-    await fixed_execute(
-        cur, 'ALTER TABLE {} ADD COLUMN {}'.format(get_table_name(table_name),
-                                                   columns_to_string(columns)))
+    await fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
 
 
 @run_with_pool()
@@ -283,11 +174,8 @@ async def create_index(
     index_name: IndexName,
     columns: List[Column],
 ) -> None:
-    uniq_word = 'UNIQUE ' if uniq else ''
-    await fixed_execute(
-        cur, 'CREATE {}INDEX IF NOT EXISTS {} ON {} ({})'.format(
-            uniq_word, get_index_name(table_name, index_name),
-            get_table_name(table_name), columns_to_string(columns)))
+    sql = gen.gen_create_index(uniq, table_name, index_name, columns)
+    await fixed_execute(cur, sql)
 
 
 async def get_only_default(cur: Cursor, default: Any) -> Any:
@@ -309,24 +197,15 @@ async def insert(
     ret_column: Optional[Column] = None,
     ret_def: Optional[Any] = None,
 ) -> Any:
-    v = [Column('%s') for x in columns]
-    ret_sql = ' returning {}'.format(ret_column) if ret_column else ''
-    await fixed_execute(
-        cur,
-        'INSERT INTO {} ({}) VALUES ({}){}'.format(get_table_name(table_name),
-                                                   columns_to_string(columns),
-                                                   columns_to_string(v),
-                                                   ret_sql), args)
+    sql = gen.gen_insert(
+        table_name=table_name,
+        columns=columns,
+        ret_column=ret_column,
+    )
+    await fixed_execute(cur, sql, args)
 
     if ret_column:
         return await get_only_default(cur, ret_def)
-
-
-def append_excluded_set(column: Column) -> str:
-    col = str(column)
-    if col.find('=') > -1:
-        return col
-    return "{} = excluded.{}".format(col, col)
 
 
 @run_with_pool()
@@ -338,23 +217,14 @@ async def insert_or_update(
         other_columns: List[Column] = [],
         args: Any = (),
 ) -> Any:
-    cols = uniq_columns + value_columns + other_columns
-    v = [Column('%s') for x in cols]
-    set_sql = ', '.join([append_excluded_set(x) for x in value_columns])
-    do_sql = " DO UPDATE SET {}".format(
-        set_sql) if value_columns else " DO NOTHING"
-    sql = "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) {}".format(
-        get_table_name(table_name), columns_to_string(cols),
-        columns_to_string(v), columns_to_string(uniq_columns), do_sql)
+    sql = gen.gen_insert_or_update(
+        table_name=table_name,
+        uniq_columns=uniq_columns,
+        value_columns=value_columns,
+        other_columns=other_columns,
+    )
 
     await fixed_execute(cur, sql, args)
-
-
-def append_update_set(column: Column) -> str:
-    col = str(column)
-    if col.find('=') > -1:
-        return col
-    return "{} = %s".format(col)
 
 
 @run_with_pool()
@@ -365,10 +235,11 @@ async def update(
         part_sql: str = '',
         args: Any = (),
 ) -> None:
-    set_sql = ', '.join([append_update_set(x) for x in columns])
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    sql = "UPDATE {} SET {}{}".format(get_table_name(table_name), set_sql,
-                                      where_sql)
+    sql = gen.gen_update(
+        table_name=table_name,
+        columns=columns,
+        part_sql=part_sql,
+    )
     await fixed_execute(cur, sql, args)
 
 
@@ -379,8 +250,7 @@ async def delete(
         part_sql: str = '',
         args: Any = (),
 ) -> None:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    sql = 'DELETE FROM {}{}'.format(get_table_name(table_name), where_sql)
+    sql = gen.gen_delete(table_name=table_name, part_sql=part_sql)
     await fixed_execute(cur, sql, args)
 
 
@@ -393,11 +263,12 @@ async def sum(
         column: Column = c('*'),
         join_sql: str = '',
 ) -> Any:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = 'SELECT sum({}) FROM {}{}{}'.format(str(column),
-                                              get_table_name(table_name),
-                                              join_sql, where_sql)
+    sql = gen.gen_sum(
+        table_name=table_name,
+        part_sql=part_sql,
+        column=column,
+        join_sql=join_sql,
+    )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
 
@@ -412,14 +283,12 @@ async def count(
     join_sql: str = '',
     groups: Optional[str] = None,
 ) -> Any:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = 'SELECT count({}) FROM {}{}{}{}'.format(
-        str(column),
-        get_table_name(table_name),
-        join_sql,
-        where_sql,
-        format_group_and_sort_sql(groups, None),
+    sql = gen.gen_count(
+        table_name=table_name,
+        part_sql=part_sql,
+        column=column,
+        join_sql=join_sql,
+        groups=groups,
     )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
@@ -438,18 +307,15 @@ async def select(
     sorts: Optional[str] = None,
     join_sql: str = '',
 ) -> Any:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    join_sql = ' {} '.format(join_sql) if join_sql else ''
-    limit_sql = '' if size is None else ' LIMIT {}'.format(size)
-    offset_sql = '' if offset is None else ' OFFSET {}'.format(offset)
-    sql = "SELECT {} FROM {}{}{} {}{}{}".format(
-        columns_to_string(columns),
-        get_table_name(table_name),
-        join_sql,
-        where_sql,
-        format_group_and_sort_sql(groups, sorts),
-        limit_sql,
-        offset_sql,
+    sql = gen.gen_select(
+        table_name=table_name,
+        columns=columns,
+        part_sql=part_sql,
+        offset=offset,
+        size=size,
+        groups=groups,
+        sorts=sorts,
+        join_sql=join_sql,
     )
     await fixed_execute(cur, sql, args)
     ret = await cur.fetchall()
@@ -490,11 +356,12 @@ async def select_one(
         args: Any = (),
         join_sql: str = '',
 ) -> Any:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    join_sql = ' {} '.format(join_sql) if join_sql else ''
-    sql = "SELECT {} FROM {}{}{} LIMIT 1".format(columns_to_string(columns),
-                                                 get_table_name(table_name),
-                                                 join_sql, where_sql)
+    sql = gen.gen_select_one(
+        table_name=table_name,
+        columns=columns,
+        part_sql=part_sql,
+        join_sql=join_sql,
+    )
     await fixed_execute(cur, sql, args)
     ret = await cur.fetchone()
     if ret:
@@ -518,17 +385,8 @@ async def select_one_only(
 
 @run_with_pool()
 async def drop_table(cur: Cursor, table_name: TableName) -> None:
-    name = get_table_name(table_name)
-    await fixed_execute(cur, f'drop table {name}')
-
-
-def gen_ordering_sql(column: Column, arr: List[Any]) -> tuple[str, str]:
-    ret = []
-    for ordering, a in enumerate(arr):
-        ret.append('({}, {})'.format(a, ordering))
-
-    return 'JOIN (VALUES {}) AS x (id, ordering) ON {} = x.id'.format(
-        ', '.join(ret), str(column)), 'ORDER BY x.ordering'
+    sql = gen.gen_drop_table(table_name)
+    await fixed_execute(cur, sql)
 
 
 @run_with_pool()
@@ -541,12 +399,12 @@ async def group_count(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
 ) -> Any:
-    where_sql = ' WHERE {}'.format(part_sql) if part_sql else ''
-    sql = "SELECT COUNT(*) FROM (SELECT {} FROM {}{}{}) G".format(
-        columns_to_string(columns),
-        get_table_name(table_name),
-        where_sql,
-        format_group_and_sort_sql(groups, sorts),
+    sql = gen.gen_group_count(
+        table_name,
+        columns=columns,
+        part_sql=part_sql,
+        groups=groups,
+        sorts=sorts,
     )
     await fixed_execute(cur, sql, args)
     return await get_only_default(cur, 0)
@@ -557,9 +415,3 @@ def fixed_execute(cur: Cursor, sql: str, args: Any = None) -> Any:
         return cur.execute(sql, args)
     else:
         return cur.execute(sql)
-
-
-def format_group_and_sort_sql(groups: str | None, sorts: str | None) -> str:
-    group_sql = f' GROUP BY {groups}' if groups else ''
-    sort_sql = f' ORDER BY {sorts}' if sorts else ''
-    return group_sql + sort_sql
