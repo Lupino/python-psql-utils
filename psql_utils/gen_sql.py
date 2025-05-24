@@ -228,7 +228,7 @@ def gen_ordering_sql(column: Column, arr: List[Any]) -> tuple[str, str]:
         ret.append('({}, {})'.format(a, ordering))
 
     return 'JOIN (VALUES {}) AS x (id, ordering) ON {} = x.id'.format(
-        ', '.join(ret), str(column)), 'ORDER BY x.ordering'
+        ', '.join(ret), str(column)), 'x.ordering'
 
 
 def gen_group_count(
