@@ -256,7 +256,7 @@ def format_groups(
     return ','.join(retval)
 
 
-def format_sorts(
+def format_sorts_one(
     sorts: str | None,
     json_keys: List[str] = [],
     keys: List[str] = [],
@@ -273,6 +273,25 @@ def format_sorts(
     if not fsorts:
         return fsorts
     return fsorts + sorts[idx:]
+
+
+def format_sorts(
+    sorts: str | None,
+    json_keys: List[str] = [],
+    keys: List[str] = [],
+) -> str | None:
+    if not sorts:
+        return sorts
+
+    items = sorts.split(',')
+
+    retval = []
+    for item in items:
+        one = format_sorts_one(item.strip())
+        if one:
+            retval.append(one)
+
+    return ', '.join(retval)
 
 
 def append_query(
