@@ -439,7 +439,7 @@ def prepare_get_list(
 
     props['sorts'] = sorts
     props['groups'] = groups
-    props['fields'] = fields
+    props['columns'] = cs(fields)
     props['join_sql'] = join_sql
 
     return props
