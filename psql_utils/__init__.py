@@ -1,8 +1,8 @@
-import aiopg
-from aiopg import Cursor, Pool
+from psycopg import AsyncCursor
+from psycopg_pool import AsyncConnectionPool
+from psycopg.rows import dict_row
 
 from functools import wraps
-from psycopg2.extras import DictCursor
 from typing import Optional, List, Dict, Any, Callable, Coroutine
 from mypy_extensions import KwArg, VarArg
 
@@ -20,13 +20,13 @@ class PGConnnectorError(Exception):
 
 class PGConnnector():
     config: Dict[str, Any]
-    pool: Pool | None
+    pool: AsyncConnectionPool | None
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.pool = None
 
-    def get(self) -> Pool:
+    def get(self) -> AsyncConnectionPool:
         if not self.pool:
             raise PGConnnectorError('no connected')
         return self.pool
@@ -34,11 +34,12 @@ class PGConnnector():
     async def connect(self) -> bool:
         try:
             if self.pool:
-                self.pool.close()
+                await self.pool.close()
         except Exception:
             pass
 
-        self.pool = await aiopg.create_pool(**self.config)
+        kwargs = {'autocommit': True}
+        self.pool = AsyncConnectionPool(self.config['dsn'], kwargs=kwargs)
 
         return True
 
@@ -75,12 +76,11 @@ async def close() -> None:
     if not _connector:
         return
     pool = _connector.get()
-    pool.close()
-    await pool.wait_closed()
+    await pool.close()
 
 
 def run_with_pool(
-    cursor_factory: Any = None
+    row_factory: Any = None
 ) -> Callable[
     [
         Callable[
@@ -123,10 +123,11 @@ def run_with_pool(
 
             try:
                 if cur is None:
-                    async with _connector.get().acquire() as conn:
-                        async with conn.cursor(
-                                cursor_factory=cursor_factory) as cur0:
-                            return await f(cur0, *args, **kwargs)
+                    pool = _connector.get()
+                    await pool.wait()
+                    async with pool.connection() as conn:
+                        async with conn.cursor(row_factory=row_factory) as c0:
+                            return await f(c0, *args, **kwargs)
                 else:
                     return await f(cur, *args, **kwargs)
             except RuntimeError as e:
@@ -150,7 +151,7 @@ def run_with_pool(
 
 @run_with_pool()
 async def create_table(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     columns: List[Column],
 ) -> None:
@@ -159,7 +160,7 @@ async def create_table(
 
 @run_with_pool()
 async def add_table_column(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     columns: List[Column],
 ) -> None:
@@ -168,7 +169,7 @@ async def add_table_column(
 
 @run_with_pool()
 async def create_index(
-    cur: Cursor,
+    cur: AsyncCursor,
     uniq: str,
     table_name: TableName,
     index_name: IndexName,
@@ -178,19 +179,17 @@ async def create_index(
     await fixed_execute(cur, sql)
 
 
-async def get_only_default(cur: Cursor, default: Any) -> Any:
+async def get_only_default(cur: AsyncCursor, default: Any) -> Any:
     ret = await cur.fetchone()
     if ret is None:
         return default
-    if ret[0]:
-        return ret[0]
-    else:
-        return default
+
+    return ret[0]
 
 
 @run_with_pool()
 async def insert(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     columns: List[Column],
     args: Any,
@@ -210,7 +209,7 @@ async def insert(
 
 @run_with_pool()
 async def insert_or_update(
-        cur: Cursor,
+        cur: AsyncCursor,
         table_name: TableName,
         uniq_columns: List[Column],
         value_columns: List[Column] = [],
@@ -229,7 +228,7 @@ async def insert_or_update(
 
 @run_with_pool()
 async def update(
-        cur: Cursor,
+        cur: AsyncCursor,
         table_name: TableName,
         columns: List[Column],
         part_sql: str = '',
@@ -245,7 +244,7 @@ async def update(
 
 @run_with_pool()
 async def delete(
-        cur: Cursor,
+        cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
         args: Any = (),
@@ -256,7 +255,7 @@ async def delete(
 
 @run_with_pool()
 async def sum(
-        cur: Cursor,
+        cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
         args: Any = (),
@@ -275,7 +274,7 @@ async def sum(
 
 @run_with_pool()
 async def count(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     part_sql: str = '',
     args: Any = (),
@@ -294,9 +293,9 @@ async def count(
     return await get_only_default(cur, 0)
 
 
-@run_with_pool(cursor_factory=DictCursor)
+@run_with_pool(row_factory=dict_row)
 async def select(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     columns: List[Column],
     part_sql: str = '',
@@ -347,9 +346,9 @@ async def select_only(
     return [list(x.values())[0] for x in ret]
 
 
-@run_with_pool(cursor_factory=DictCursor)
+@run_with_pool(row_factory=dict_row)
 async def select_one(
-        cur: Cursor,
+        cur: AsyncCursor,
         table_name: TableName,
         columns: List[Column],
         part_sql: str = '',
@@ -384,14 +383,14 @@ async def select_one_only(
 
 
 @run_with_pool()
-async def drop_table(cur: Cursor, table_name: TableName) -> None:
+async def drop_table(cur: AsyncCursor, table_name: TableName) -> None:
     sql = gen.gen_drop_table(table_name)
     await fixed_execute(cur, sql)
 
 
 @run_with_pool()
 async def group_count(
-    cur: Cursor,
+    cur: AsyncCursor,
     table_name: TableName,
     columns: List[Column],
     part_sql: str = '',
@@ -410,7 +409,7 @@ async def group_count(
     return await get_only_default(cur, 0)
 
 
-def fixed_execute(cur: Cursor, sql: str, args: Any = None) -> Any:
+def fixed_execute(cur: AsyncCursor, sql: str, args: Any = None) -> Any:
     if args and len(args) > 0:
         return cur.execute(sql, args)
     else:

@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    'aiopg',
+    'psycopg[binary,pool]',
     'mypy_extensions'
 ]
 
