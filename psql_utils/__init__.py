@@ -39,7 +39,8 @@ class PGConnnector():
             pass
 
         kwargs = {'autocommit': True}
-        self.pool = AsyncConnectionPool(self.config['dsn'], kwargs=kwargs)
+        self.pool = AsyncConnectionPool(self.config['dsn'], kwargs=kwargs, open=False,)
+        await self.pool.open()
 
         return True
 
@@ -124,7 +125,6 @@ def run_with_pool(
             try:
                 if cur is None:
                     pool = _connector.get()
-                    await pool.wait()
                     async with pool.connection() as conn:
                         async with conn.cursor(row_factory=row_factory) as c0:
                             return await f(c0, *args, **kwargs)
