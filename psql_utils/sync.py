@@ -1,9 +1,9 @@
-from psycopg import AsyncCursor
-from psycopg_pool import AsyncConnectionPool
+from psycopg import Cursor
+from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 
 from functools import wraps
-from typing import Optional, List, Dict, Any, Callable, Coroutine
+from typing import Optional, List, Dict, Any, Callable
 from mypy_extensions import KwArg, VarArg
 
 from .types import TableName, LeftJoin, Column, IndexName, \
@@ -20,31 +20,31 @@ class PGConnnectorError(Exception):
 
 class PGConnnector():
     config: Dict[str, Any]
-    pool: AsyncConnectionPool | None
+    pool: ConnectionPool | None
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.pool = None
 
-    def get(self) -> AsyncConnectionPool:
+    def get(self) -> ConnectionPool:
         if not self.pool:
             raise PGConnnectorError('no connected')
         return self.pool
 
-    async def connect(self) -> bool:
+    def connect(self) -> bool:
         try:
             if self.pool:
-                await self.pool.close()
+                self.pool.close()
         except Exception:
             pass
 
         kwargs = {'autocommit': True}
-        self.pool = AsyncConnectionPool(
+        self.pool = ConnectionPool(
             self.config['dsn'],
             kwargs=kwargs,
             open=False,
         )
-        await self.pool.open()
+        self.pool.open()
 
         return True
 
@@ -58,30 +58,30 @@ def get_connector() -> PGConnnector:
     return _connector
 
 
-_connected_events: List[Callable[[], Coroutine[Any, Any, Any]]] = []
+_connected_events: List[Callable[[], Any]] = []
 
 
-def on_connected(func: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
+def on_connected(func: Callable[[], Any]) -> Any:
     _connected_events.append(func)
 
 
-async def connect(config: Any) -> bool:
+def connect(config: Any) -> bool:
     global _connector
     _connector = PGConnnector(config)
 
-    if await _connector.connect():
+    if _connector.connect():
         for evt in _connected_events:
-            await evt()
+            evt()
         return True
 
     return False
 
 
-async def close() -> None:
+def close() -> None:
     if not _connector:
         return
     pool = _connector.get()
-    await pool.close()
+    pool.close()
 
 
 def run_with_pool(
@@ -93,7 +93,7 @@ def run_with_pool(
                 VarArg(Any),
                 KwArg(Any),
             ],
-            Coroutine[Any, Any, Any],
+            Any,
         ],
     ],
         Callable[
@@ -101,7 +101,7 @@ def run_with_pool(
                 VarArg(Any),
                 KwArg(Any),
             ],
-            Coroutine[Any, Any, Any],
+            Any,
         ],
 ]:
 
@@ -111,38 +111,38 @@ def run_with_pool(
                 VarArg(Any),
                 KwArg(Any),
             ],
-            Coroutine[Any, Any, Any],
+            Any,
         ]
     ) -> Callable[
         [
             VarArg(Any),
             KwArg(Any),
         ],
-            Coroutine[Any, Any, Any],
+            Any,
     ]:
 
         @wraps(f)
-        async def run(*args: Any, cur: Any = None, **kwargs: Any) -> Any:
+        def run(*args: Any, cur: Any = None, **kwargs: Any) -> Any:
             if _connector is None:
                 raise PGConnnectorError('not connected')
 
             try:
                 if cur is None:
                     pool = _connector.get()
-                    async with pool.connection() as conn:
-                        async with conn.cursor(row_factory=row_factory) as c0:
-                            return await f(c0, *args, **kwargs)
+                    with pool.connection() as conn:
+                        with conn.cursor(row_factory=row_factory) as c0:
+                            return f(c0, *args, **kwargs)
                 else:
-                    return await f(cur, *args, **kwargs)
+                    return f(cur, *args, **kwargs)
             except RuntimeError as e:
                 if cur:
                     raise e
 
                 err = str(e)
                 if err.find('closing') > -1:
-                    connected = await _connector.connect()
+                    connected = _connector.connect()
                     if connected:
-                        return await run(*args, **kwargs)
+                        return run(*args, **kwargs)
                     else:
                         raise e
                 else:
@@ -154,37 +154,37 @@ def run_with_pool(
 
 
 @run_with_pool()
-async def create_table(
-    cur: AsyncCursor,
+def create_table(
+    cur: Cursor,
     table_name: TableName,
     columns: List[Column],
 ) -> None:
-    await fixed_execute(cur, gen.gen_create_table(table_name, columns))
+    fixed_execute(cur, gen.gen_create_table(table_name, columns))
 
 
 @run_with_pool()
-async def add_table_column(
-    cur: AsyncCursor,
+def add_table_column(
+    cur: Cursor,
     table_name: TableName,
     columns: List[Column],
 ) -> None:
-    await fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
+    fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
 
 
 @run_with_pool()
-async def create_index(
-    cur: AsyncCursor,
+def create_index(
+    cur: Cursor,
     uniq: str,
     table_name: TableName,
     index_name: IndexName,
     columns: List[Column],
 ) -> None:
     sql = gen.gen_create_index(uniq, table_name, index_name, columns)
-    await fixed_execute(cur, sql)
+    fixed_execute(cur, sql)
 
 
-async def get_only_default(cur: AsyncCursor, default: Any) -> Any:
-    ret = await cur.fetchone()
+def get_only_default(cur: Cursor, default: Any) -> Any:
+    ret = cur.fetchone()
     if ret is None:
         return default
 
@@ -192,8 +192,8 @@ async def get_only_default(cur: AsyncCursor, default: Any) -> Any:
 
 
 @run_with_pool()
-async def insert(
-    cur: AsyncCursor,
+def insert(
+    cur: Cursor,
     table_name: TableName,
     columns: List[Column],
     args: Any,
@@ -205,15 +205,15 @@ async def insert(
         columns=columns,
         ret_column=ret_column,
     )
-    await fixed_execute(cur, sql, args)
+    fixed_execute(cur, sql, args)
 
     if ret_column:
-        return await get_only_default(cur, ret_def)
+        return get_only_default(cur, ret_def)
 
 
 @run_with_pool()
-async def insert_or_update(
-        cur: AsyncCursor,
+def insert_or_update(
+        cur: Cursor,
         table_name: TableName,
         uniq_columns: List[Column],
         value_columns: List[Column] = [],
@@ -227,12 +227,12 @@ async def insert_or_update(
         other_columns=other_columns,
     )
 
-    await fixed_execute(cur, sql, args)
+    fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
-async def update(
-        cur: AsyncCursor,
+def update(
+        cur: Cursor,
         table_name: TableName,
         columns: List[Column],
         part_sql: str = '',
@@ -243,23 +243,23 @@ async def update(
         columns=columns,
         part_sql=part_sql,
     )
-    await fixed_execute(cur, sql, args)
+    fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
-async def delete(
-        cur: AsyncCursor,
+def delete(
+        cur: Cursor,
         table_name: TableName,
         part_sql: str = '',
         args: Any = (),
 ) -> None:
     sql = gen.gen_delete(table_name=table_name, part_sql=part_sql)
-    await fixed_execute(cur, sql, args)
+    fixed_execute(cur, sql, args)
 
 
 @run_with_pool()
-async def sum(
-        cur: AsyncCursor,
+def sum(
+        cur: Cursor,
         table_name: TableName,
         part_sql: str = '',
         args: Any = (),
@@ -272,13 +272,13 @@ async def sum(
         column=column,
         join_sql=join_sql,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    fixed_execute(cur, sql, args)
+    return get_only_default(cur, 0)
 
 
 @run_with_pool()
-async def count(
-    cur: AsyncCursor,
+def count(
+    cur: Cursor,
     table_name: TableName,
     part_sql: str = '',
     args: Any = (),
@@ -293,13 +293,13 @@ async def count(
         join_sql=join_sql,
         groups=groups,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    fixed_execute(cur, sql, args)
+    return get_only_default(cur, 0)
 
 
 @run_with_pool(row_factory=dict_row)
-async def select(
-    cur: AsyncCursor,
+def select(
+    cur: Cursor,
     table_name: TableName,
     columns: List[Column],
     part_sql: str = '',
@@ -320,12 +320,12 @@ async def select(
         sorts=sorts,
         join_sql=join_sql,
     )
-    await fixed_execute(cur, sql, args)
-    ret = await cur.fetchall()
+    fixed_execute(cur, sql, args)
+    ret = cur.fetchall()
     return [dict(x) for x in ret]
 
 
-async def select_only(
+def select_only(
     table_name: TableName,
     column: Column,
     part_sql: str = '',
@@ -336,7 +336,7 @@ async def select_only(
     sorts: Optional[str] = None,
     join_sql: str = '',
 ) -> Any:
-    ret = await select(
+    ret = select(
         table_name,
         [column],
         part_sql,
@@ -351,8 +351,8 @@ async def select_only(
 
 
 @run_with_pool(row_factory=dict_row)
-async def select_one(
-        cur: AsyncCursor,
+def select_one(
+        cur: Cursor,
         table_name: TableName,
         columns: List[Column],
         part_sql: str = '',
@@ -365,21 +365,21 @@ async def select_one(
         part_sql=part_sql,
         join_sql=join_sql,
     )
-    await fixed_execute(cur, sql, args)
-    ret = await cur.fetchone()
+    fixed_execute(cur, sql, args)
+    ret = cur.fetchone()
     if ret:
         return dict(ret)
     return None
 
 
-async def select_one_only(
+def select_one_only(
         table_name: TableName,
         column: Column,
         part_sql: str = '',
         args: Any = (),
         join_sql: str = '',
 ) -> Any:
-    ret = await select_one(table_name, [column], part_sql, args, join_sql)
+    ret = select_one(table_name, [column], part_sql, args, join_sql)
     if ret:
         return list(ret.values())[0]
 
@@ -387,14 +387,14 @@ async def select_one_only(
 
 
 @run_with_pool()
-async def drop_table(cur: AsyncCursor, table_name: TableName) -> None:
+def drop_table(cur: Cursor, table_name: TableName) -> None:
     sql = gen.gen_drop_table(table_name)
-    await fixed_execute(cur, sql)
+    fixed_execute(cur, sql)
 
 
 @run_with_pool()
-async def group_count(
-    cur: AsyncCursor,
+def group_count(
+    cur: Cursor,
     table_name: TableName,
     columns: List[Column],
     part_sql: str = '',
@@ -409,11 +409,11 @@ async def group_count(
         groups=groups,
         sorts=sorts,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    fixed_execute(cur, sql, args)
+    return get_only_default(cur, 0)
 
 
-def fixed_execute(cur: AsyncCursor, sql: str, args: Any = None) -> Any:
+def fixed_execute(cur: Cursor, sql: str, args: Any = None) -> Any:
     if args and len(args) > 0:
         return cur.execute(sql, args)
     else:

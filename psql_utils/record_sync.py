@@ -1,15 +1,14 @@
-from . import select_one_only, select_one, select, count as pg_count, \
+from .sync import select_one_only, select_one, select, count as pg_count, \
     update, insert, delete, c, cs
 from .types import TableName
 from time import time
-import asyncio
 from typing import Optional, List, Any, Callable
 from .record_utils import popup_data, EmptyRows, get_uniq_data, \
     prepare_count, prepare_get_list, prepare_save, \
     prepare_get_by_uniq, prepare_get_by_id
 
 
-async def get(
+def get(
     table: TableName,
     *,
     id: Optional[int] = None,
@@ -43,7 +42,7 @@ async def get(
             return None
 
         if get_max_id:
-            id = await select_one_only(table, **props)
+            id = select_one_only(table, **props)
             if not id:
                 return None
 
@@ -54,7 +53,7 @@ async def get(
                 **data,
             )
 
-    ret = await select_one(table, **props)
+    ret = select_one(table, **props)
 
     if popup:
         return popup_data(ret)
@@ -62,7 +61,7 @@ async def get(
     return ret
 
 
-async def save(
+def save(
     table: TableName,
     *,
     id: Optional[int] = None,
@@ -78,13 +77,13 @@ async def save(
 ) -> Any:
 
     if id:
-        old = await get(table, id=id)
+        old = get(table, id=id)
         if not old:
             raise Exception(f'update record[{id}], the record is not exists')
     else:
         _, uniq_data = get_uniq_data(uniq_keys=uniq_keys, **data)
 
-        old = await get(
+        old = get(
             table,
             uniq_keys=uniq_keys,
             optional_keys=optional_keys,
@@ -112,7 +111,7 @@ async def save(
         )
 
         if uniq_changed:
-            old1 = await get(
+            old1 = get(
                 table,
                 uniq_keys=uniq_keys,
                 optional_keys=optional_keys,
@@ -129,28 +128,24 @@ async def save(
             return old['id']
 
         args.append(old['id'])
-        await update(table, cs(rkeys), 'id=%s', tuple(args))
+        update(table, cs(rkeys), 'id=%s', tuple(args))
 
         if on_saved:
-            ret = on_saved(old, old['id'])
-            if asyncio.iscoroutine(ret):
-                await ret
+            on_saved(old, old['id'])
         return old['id']
     else:
         if 'created_at' in keys and data.get('created_at') is None:
             rkeys.append('created_at')
             args.append(int(time()))
 
-        nid = await insert(table, cs(rkeys), tuple(args), c('id'))
+        nid = insert(table, cs(rkeys), tuple(args), c('id'))
         if on_saved:
-            ret = on_saved(None, nid)
-            if asyncio.iscoroutine(ret):
-                await ret
+            on_saved(None, nid)
 
         return nid
 
 
-async def remove(
+def remove(
     table: TableName,
     *args: Any,
     on_removed: Optional[Callable[[Any], Any]] = None,
@@ -158,30 +153,22 @@ async def remove(
 ) -> bool:
     fields = ['*'] if on_removed else ['id']
 
-    old = await get(
-        table,
-        *args,
-        fields=fields,
-        ignore_extra_keys=True,
-        **kwargs,
-    )
+    old = get(table, *args, fields=fields, ignore_extra_keys=True, **kwargs)
     if old:
-        await delete(table, 'id=%s', (old['id'], ))
+        delete(table, 'id=%s', (old['id'], ))
         if on_removed:
-            ret = on_removed(old)
-            if asyncio.iscoroutine(ret):
-                await ret
+            on_removed(old)
 
         return True
     return False
 
 
-async def count(table: TableName, *args: Any, **kwargs: Any) -> int:
+def count(table: TableName, *args: Any, **kwargs: Any) -> int:
     props = prepare_count(*args, **kwargs)
-    return int(await pg_count(table, **props))
+    return int(pg_count(table, **props))
 
 
-async def get_list(
+def get_list(
     table: TableName,
     *args: Any,
     offset: Optional[int] = None,
@@ -195,7 +182,7 @@ async def get_list(
     except EmptyRows:
         return []
 
-    ret = await select(table, offset=offset, size=size, **props)
+    ret = select(table, offset=offset, size=size, **props)
 
     if popup:
         return [popup_data(v) for v in ret]
