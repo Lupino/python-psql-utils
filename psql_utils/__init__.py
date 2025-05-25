@@ -6,10 +6,7 @@ from functools import wraps
 from typing import Optional, List, Dict, Any, Callable, Coroutine
 from mypy_extensions import KwArg, VarArg
 
-from .types import TableName, LeftJoin, Column, IndexName, \
-    t, c, c_all, cs, cs_all, i, \
-    get_table_name, columns_to_string, get_index_name, \
-    constraint_primary_key # noqa
+from .types import TableName, Column, IndexName, c
 
 from . import gen_sql as gen
 

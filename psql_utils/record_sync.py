@@ -1,6 +1,6 @@
 from .sync import select_one_only, select_one, select, count as pg_count, \
-    update, insert, delete, c, cs
-from .types import TableName
+    update, insert, delete
+from .types import TableName, c, cs
 from time import time
 from typing import Optional, List, Any, Callable
 from .record_utils import popup_data, EmptyRows, get_uniq_data, \
