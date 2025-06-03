@@ -24,3 +24,7 @@ dependencies = [
 packages = [
     "psql_utils"
 ]
+[tool.setuptools.package-data]
+psql_utils = [
+    "py.typed"
+]

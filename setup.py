@@ -15,6 +15,7 @@ setup(
     author_email='lmjubuntu@gmail.com',
     url='https://github.com/Lupino/python-psql-utils',
     packages=packages,
+    package_data={"psql_utils": ["py.typed"]},
     package_dir={'psql_utils': 'psql_utils'},
     include_package_data=True,
     install_requires=requires,
