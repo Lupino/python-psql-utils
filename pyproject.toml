@@ -1,30 +1,39 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm"]
+# Dependencies required to build the package
+# setuptools-scm is included for future version control integration
+requires = ["setuptools>=61.0", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "psql_utils"
 version = "0.1.0"
+description = "PostgreSQL Simple util tools."
+readme = "README.md"
+# Python 3.7 is EOL; 3.8+ is recommended for modern typing support
+requires-python = ">=3.8"
+license = {text = "MIT"}
 authors = [
     {name = "Li Meng Jun", email = "lmjubuntu@gmail.com"},
 ]
-description = "PostgreSQL Simple util tools."
-readme = "README.md"
-requires-python = ">=3.7"
-license = {text = "MIT"}
+# Classifiers help users find your project on PyPI
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+    "Typing :: Typed",
 ]
 dependencies = [
-    'psycopg[binary,pool]',
-    'mypy_extensions'
+    # Psycopg 3 with binary drivers and connection pool support
+    "psycopg[binary,pool]",
 ]
 
 [tool.setuptools]
-packages = [
-    "psql_utils"
-]
+# Explicitly discover the package
+packages = ["psql_utils"]
+
 [tool.setuptools.package-data]
-psql_utils = [
-    "py.typed"
-]
+# Include the marker file for PEP 561 (Type Hinting) compliance
+psql_utils = ["py.typed"]

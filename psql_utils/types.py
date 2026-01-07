@@ -1,66 +1,78 @@
-from typing import Optional, List
+from typing import List, Optional, Union
 
 
-class TableName(object):
+class LeftJoin:
+    """Represents a LEFT JOIN clause in SQL."""
+
+    def __init__(self, table_node: 'TableName', where: str) -> None:
+        # Renamed 'table_name' to 'table_node' internally to avoid confusion
+        # between the class instance and the string name, though types match.
+        self.table_node = table_node
+        self.where = where
+
+    def __str__(self) -> str:
+        return f'LEFT JOIN {self.table_node} ON {self.where}'
+
+
+class TableName:
+    """
+    Represents a SQL table, including its alias and any joined tables.
+    """
     table_name: str
-    alias_name: str | None
-    joins: List['LeftJoin']
+    alias_name: Optional[str]
+    joins: List[LeftJoin]
 
     def __init__(
         self,
         table_name: str,
         alias: Optional[str] = None,
-        joins: List['LeftJoin'] = [],
+        joins: Optional[List[LeftJoin]] = None,
     ) -> None:
         self.table_name = table_name
         self.alias_name = alias
-        self.joins = joins
+        # Fix: Use None as default to avoid mutable default argument issues
+        self.joins = joins if joins is not None else []
 
     def alias(self, alias: str) -> 'TableName':
+        """Returns a new TableName instance with the specified alias."""
+        # Create a copy of the joins list to maintain immutability
         return TableName(self.table_name, alias, self.joins[:])
 
     def join(self, table: 'TableName', where: str) -> 'TableName':
-        joins = self.joins[:]
-        joins.append(LeftJoin(table, where))
-
-        return TableName(self.table_name, self.alias_name, joins)
+        """Adds a LEFT JOIN to the table."""
+        new_joins = self.joins[:]
+        new_joins.append(LeftJoin(table, where))
+        return TableName(self.table_name, self.alias_name, new_joins)
 
     def __str__(self) -> str:
+        # Handle table name quoting and aliasing
         if self.alias_name is None:
-            table_name = f'"{self.table_name}"'
+            base_name = f'"{self.table_name}"'
         else:
-            table_name = f'"{self.table_name}" AS {self.alias_name}'
+            base_name = f'"{self.table_name}" AS {self.alias_name}'
 
-        if len(self.joins) > 0:
-            table_name += ' ' + ' '.join([str(join) for join in self.joins])
+        # Append joins if they exist
+        if self.joins:
+            join_str = ' '.join(str(join) for join in self.joins)
+            return f'{base_name} {join_str}'
 
-        return table_name
-
-
-class LeftJoin(object):
-    table_name: TableName
-    where: str
-
-    def __init__(self, table_name: TableName, where: str) -> None:
-        self.table_name = table_name
-        self.where = where
-
-    def __str__(self) -> str:
-        return f'''LEFT JOIN {str(self.table_name)} ON {self.where} '''
+        return base_name
 
 
-def get_table_name(table_name: List[TableName] | TableName) -> str:
-    if isinstance(table_name, list):
-        return ', '.join([str(tn) for tn in table_name])
-
-    return str(table_name)
+def get_table_name(table_node: Union[List[TableName], TableName]) -> str:
+    """Converts a TableName or list of TableNames to a string."""
+    if isinstance(table_node, list):
+        return ', '.join(str(tn) for tn in table_node)
+    return str(table_node)
 
 
 def t(table_name: str) -> TableName:
+    """Shorthand factory for creating a TableName."""
     return TableName(table_name)
 
 
-class Column(object):
+class Column:
+    """Represents a SQL column."""
     column: str
 
     def __init__(self, column: str) -> None:
@@ -71,24 +83,29 @@ class Column(object):
 
 
 def c(column: str) -> Column:
+    """Shorthand factory for creating a Column."""
     return Column(column)
 
 
+# Pre-defined wildcard column
 c_all = c('*')
 
 
 def cs(columns: List[str]) -> List[Column]:
-    return [c(x) for x in columns]
+    """Converts a list of strings to a list of Column objects."""
+    return [c(col) for col in columns]
 
 
 cs_all = cs(['*'])
 
 
 def columns_to_string(columns: List[Column]) -> str:
-    return ', '.join([str(x) for x in columns])
+    """Joins a list of Column objects into a comma-separated string."""
+    return ', '.join(str(col) for col in columns)
 
 
-class IndexName(object):
+class IndexName:
+    """Represents a SQL index name."""
     index_name: str
 
     def __init__(self, index_name: str) -> None:
@@ -99,18 +116,21 @@ class IndexName(object):
 
 
 def i(index_name: str) -> IndexName:
+    """Shorthand factory for creating an IndexName."""
     return IndexName(index_name)
 
 
-def get_index_name(table_name: TableName, index_name: IndexName) -> str:
-    return '"{}_{}"'.format(table_name.table_name, index_name.index_name)
+def get_index_name(table_node: TableName, index_node: IndexName) -> str:
+    """Formats an index name based on the table and index identifier."""
+    return f'"{table_node.table_name}_{index_node.index_name}"'
 
 
 def constraint_primary_key(
-    table_name: TableName,
+    table_node: TableName,
     columns: List[Column],
 ) -> Column:
-    return Column('CONSTRAINT {} PRIMARY KEY ({})'.format(
-        get_index_name(table_name, i('pk')),
-        columns_to_string(columns),
-    ))
+    """Creates a PRIMARY KEY constraint definition."""
+    pk_name = get_index_name(table_node, i('pk'))
+    cols_str = columns_to_string(columns)
+
+    return Column(f'CONSTRAINT {pk_name} PRIMARY KEY ({cols_str})')

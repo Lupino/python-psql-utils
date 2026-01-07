@@ -1,25 +1,32 @@
-from .sync import select_one_only, select_one, select, count as pg_count, \
-    update, insert, delete
-from .types import TableName, c, cs
 from time import time
 from typing import Optional, List, Any, Callable
-from .record_utils import popup_data, EmptyRows, get_uniq_data, \
-    prepare_count, prepare_get_list, prepare_save, \
-    prepare_get_by_uniq, prepare_get_by_id
+
+from .sync import (select_one_only, select_one, select, count as pg_count,
+                   update, insert, delete)
+from .types import TableName, c, cs
+from .record_utils import (popup_data, EmptyRows, get_uniq_data, prepare_count,
+                           prepare_get_list, prepare_save, prepare_get_by_uniq,
+                           prepare_get_by_id)
 
 
 def get(
     table: TableName,
     *,
     id: Optional[int] = None,
-    uniq_keys: List[str] = [],
-    optional_keys: List[str] = [],
+    uniq_keys: Optional[List[str]] = None,
+    optional_keys: Optional[List[str]] = None,
     required_uniq_keys: bool = True,
     ignore_extra_keys: bool = False,
-    fields: List[str] = ['*'],
+    fields: Optional[List[str]] = None,
     popup: bool = False,
     **data: Any,
 ) -> Any:
+    """
+    Retrieves a single record synchronously by ID or unique keys.
+    """
+    uniq_keys = uniq_keys or []
+    optional_keys = optional_keys or []
+    fields = fields or ['*']
 
     if id:
         props = prepare_get_by_id(
@@ -41,13 +48,14 @@ def get(
         except EmptyRows:
             return None
 
+        # Special case: if fetching max(id), resolve it to a specific ID first
         if get_max_id:
-            id = select_one_only(table, **props)
-            if not id:
+            id_val = select_one_only(table, **props)
+            if not id_val:
                 return None
 
             props = prepare_get_by_id(
-                id=id,
+                id=id_val,
                 fields=fields,
                 ignore_extra_keys=ignore_extra_keys,
                 **data,
@@ -65,24 +73,36 @@ def save(
     table: TableName,
     *,
     id: Optional[int] = None,
-    keys: List[str] = [],
-    uniq_keys: List[str] = [],
-    optional_keys: List[str] = [],
-    json_keys: List[str] = [],
-    sub_json_keys: List[str] = [],
-    replace_keys: List[str] = [],
-    exclude_data_keys: List[str] = [],
+    keys: Optional[List[str]] = None,
+    uniq_keys: Optional[List[str]] = None,
+    optional_keys: Optional[List[str]] = None,
+    json_keys: Optional[List[str]] = None,
+    sub_json_keys: Optional[List[str]] = None,
+    replace_keys: Optional[List[str]] = None,
+    exclude_data_keys: Optional[List[str]] = None,
     on_saved: Optional[Callable[[Any, int], Any]] = None,
     **data: Any,
 ) -> Any:
+    """
+    Inserts or updates a record synchronously.
+    - If 'id' is provided, attempts an update.
+    - If not, uses unique keys to determine if it should insert or update.
+    """
+    keys = keys or []
+    uniq_keys = uniq_keys or []
+    optional_keys = optional_keys or []
+    json_keys = json_keys or []
+    sub_json_keys = sub_json_keys or []
+    replace_keys = replace_keys or []
+    exclude_data_keys = exclude_data_keys or []
 
+    # Determine existing record for Update vs Insert logic
     if id:
         old = get(table, id=id)
         if not old:
-            raise Exception(f'update record[{id}], the record is not exists')
+            raise Exception(f'Update failed: record [{id}] does not exist')
     else:
         _, uniq_data = get_uniq_data(uniq_keys=uniq_keys, **data)
-
         old = get(
             table,
             uniq_keys=uniq_keys,
@@ -104,6 +124,7 @@ def save(
     )
 
     if old:
+        # Check for unique key conflicts on update
         uniq_changed, uniq_full_data = get_uniq_data(
             uniq_keys=uniq_keys,
             old_record=old,
@@ -111,7 +132,7 @@ def save(
         )
 
         if uniq_changed:
-            old1 = get(
+            existing_conflict = get(
                 table,
                 uniq_keys=uniq_keys,
                 optional_keys=optional_keys,
@@ -119,11 +140,12 @@ def save(
                 ignore_extra_keys=True,
                 **uniq_full_data,
             )
-            if old1:
-                oid = old1['id']
-                err = f'cant update record uniq value to exists value {oid}'
-                raise Exception(err)
+            if existing_conflict:
+                oid = existing_conflict['id']
+                raise Exception(
+                    f'Cannot update: unique value conflicts with record {oid}')
 
+        # Optimization: Return early if no data changed
         if len(args) == 0:
             return old['id']
 
@@ -133,7 +155,9 @@ def save(
         if on_saved:
             on_saved(old, old['id'])
         return old['id']
+
     else:
+        # Insert path
         if 'created_at' in keys and data.get('created_at') is None:
             rkeys.append('created_at')
             args.append(int(time()))
@@ -151,19 +175,25 @@ def remove(
     on_removed: Optional[Callable[[Any], Any]] = None,
     **kwargs: Any,
 ) -> bool:
+    """
+    Removes a record.
+    Fetches it first to ensure existence and to pass to the callback.
+    """
     fields = ['*'] if on_removed else ['id']
 
     old = get(table, *args, fields=fields, ignore_extra_keys=True, **kwargs)
+
     if old:
         delete(table, 'id=%s', (old['id'], ))
         if on_removed:
             on_removed(old)
-
         return True
+
     return False
 
 
 def count(table: TableName, *args: Any, **kwargs: Any) -> int:
+    """Returns the count of records matching criteria."""
     props = prepare_count(*args, **kwargs)
     return int(pg_count(table, **props))
 
@@ -176,7 +206,10 @@ def get_list(
     popup: bool = False,
     **kwargs: Any,
 ) -> Any:
-
+    """
+    Retrieves a list of records.
+    Returns an empty list if criteria results in an EmptyRows exception.
+    """
     try:
         props = prepare_get_list(*args, **kwargs)
     except EmptyRows:

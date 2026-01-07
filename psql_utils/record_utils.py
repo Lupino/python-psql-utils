@@ -1,10 +1,12 @@
-from .types import c, cs
 import json
-from time import time
 import re
-from typing import Optional, List, Dict, Any
+from time import time
+from typing import Optional, List, Dict, Any, Tuple
 
-op_map = {
+from .types import c, cs
+
+# Operator mapping for SQL generation (e.g., 'age_gt' -> 'age > %s')
+OP_MAP = {
     'gt': '>',
     'lt': '<',
     'lte': '<=',
@@ -19,29 +21,36 @@ op_map = {
     'unsimilar': ' not similar to ',
 }
 
-re_op = re.compile('_(' + '|'.join(op_map.keys()) + ')$')
-re_num = re.compile(r'^\d+(.\d+)?$')
+# Regex to detect operators at the end of a key (e.g., '_gt')
+RE_OP = re.compile('_(' + '|'.join(OP_MAP.keys()) + ')$')
+RE_NUM = re.compile(r'^\d+(.\d+)?$')
 
 IGNORE = '__IGNORE__'
 
 
 class EmptyRows(Exception):
+    """Exception raised when a query should return no rows
+    (e.g., empty IN clause)."""
     pass
 
 
 def merge_json(new: Any, old: Any) -> Any:
+    """Recursively updates a dictionary if both inputs are dicts."""
     if isinstance(new, dict) and isinstance(old, dict):
         old.update(new)
         return old
-
     return new
 
 
 def merge_sub_json(
     data0: Any,
     data1: Any,
-    replace_keys: List[str] = [],
+    replace_keys: Optional[List[str]] = None,
 ) -> Any:
+    """Merges specific sub-dictionaries, skipping keys in replace_keys."""
+    if replace_keys is None:
+        replace_keys = []
+
     for k, v in data1.items():
         if k not in replace_keys:
             new = data0.get(k)
@@ -49,7 +58,6 @@ def merge_sub_json(
                 data0[k] = v
             else:
                 data0[k] = merge_json(data0[k], v)
-
     return data0
 
 
@@ -58,57 +66,71 @@ def append_extra(
     args: List[Any],
     data: Dict[str, Any],
 ) -> None:
+    """Appends remaining dictionary items as standard equality checks."""
     for key, val in data.items():
-        if val is None:
-            continue
-        part_sql.append(f'{key}=%s')
-        args.append(val)
+        if val is not None:
+            part_sql.append(f'{key}=%s')
+            args.append(val)
 
 
 def prepare_save(
-    keys: List[str] = [],
-    uniq_keys: List[str] = [],
-    exclude_data_keys: List[str] = [],
-    json_keys: List[str] = [],
-    replace_keys: List[str] = [],
-    sub_json_keys: List[str] = [],
+    keys: Optional[List[str]] = None,
+    uniq_keys: Optional[List[str]] = None,
+    exclude_data_keys: Optional[List[str]] = None,
+    json_keys: Optional[List[str]] = None,
+    replace_keys: Optional[List[str]] = None,
+    sub_json_keys: Optional[List[str]] = None,
     old_record: Optional[Any] = None,
     **data: Any,
-) -> tuple[List[str], List[Any]]:
+) -> Tuple[List[str], List[Any]]:
+    """
+    Prepares columns and arguments for an INSERT or UPDATE statement.
+    Handles JSON merging and modification checks against old_record.
+    """
+    keys = keys or []
+    uniq_keys = uniq_keys or []
+    exclude_data_keys = exclude_data_keys or []
+    json_keys = json_keys or []
+    replace_keys = replace_keys or []
+    sub_json_keys = sub_json_keys or []
+
     rkeys = []
     args = []
 
-    if len(exclude_data_keys) > 0:
+    # Move specific keys from root to 'data' dict if requested
+    if exclude_data_keys:
         data = make_data(data.copy(), exclude_data_keys)
 
+    # Handle standard columns
     all_keys = keys + uniq_keys
-
     for key in all_keys:
         val = data.get(key)
         if val is not None:
-            if old_record:
-                if old_record[key] == val:
-                    continue
-
+            # Skip if value hasn't changed
+            if old_record and old_record.get(key) == val:
+                continue
             rkeys.append(key)
             args.append(val)
 
+    # Handle JSON columns with merging
     for key in json_keys:
         val = data.get(key)
         if val is not None:
             if old_record and key not in replace_keys:
-                val = merge_json(val, old_record[key])
+                val = merge_json(val, old_record.get(key))
             rkeys.append(key)
             args.append(json.dumps(val))
 
+    # Handle Sub-JSON columns
     for key in sub_json_keys:
         val = data.get(key)
         if val is not None:
             if old_record:
-                val = merge_sub_json(val, old_record[key], replace_keys)
+                val = merge_sub_json(val, old_record.get(key), replace_keys)
             rkeys.append(key)
             args.append(json.dumps(val))
 
+    # Auto-update timestamp
     if 'updated_at' in keys and data.get('updated_at') is None:
         rkeys.append('updated_at')
         args.append(int(time()))
@@ -117,52 +139,50 @@ def prepare_save(
 
 
 def get_uniq_data(
-    uniq_keys: List[str] = [],
+    uniq_keys: Optional[List[str]] = None,
     old_record: Optional[Any] = None,
     **data: Any,
-) -> tuple[bool, Dict[str, Any]]:
+) -> Tuple[bool, Dict[str, Any]]:
+    """Determines if unique keys have changed compared to the old record."""
+    uniq_keys = uniq_keys or []
     uniq_data: Dict[str, Any] = {}
     uniq_changed = False
 
     for key in uniq_keys:
         val = data.get(key)
 
+        # Fallback to old record value if missing in new data
         if val is None and old_record:
-            val = old_record[key]
+            val = old_record.get(key)
 
         uniq_data[key] = val
 
         if not old_record:
             continue
 
-        if old_record[key] == val:
-            continue
-
-        uniq_changed = True
+        if old_record.get(key) != val:
+            uniq_changed = True
 
     return uniq_changed, uniq_data
 
 
 def guess_type(val: Any) -> str:
+    """Attempts to infer the SQL type from a Python value."""
     if isinstance(val, bytes):
         val = str(val, 'utf-8')
 
     if isinstance(val, str):
         l_val = val.lower()
-        if l_val == 'true' or l_val == 'false':
+        if l_val in ('true', 'false'):
             return 'boolean'
 
-        if re_num.search(val):
-            if val.isdigit():
-                return 'int'
-            return 'float'
+        if RE_NUM.search(val):
+            return 'int' if val.isdigit() else 'float'
 
     if isinstance(val, bool):
         return 'boolean'
-
     if isinstance(val, int):
         return 'int'
-
     if isinstance(val, float):
         return 'float'
 
@@ -172,50 +192,60 @@ def guess_type(val: Any) -> str:
 def format_key(
     key: str,
     val: Any,
-    json_keys: List[str] = [],
-    keys: List[str] = [],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
 ) -> str:
+    """
+    Formats a dictionary key into a SQL column or JSON path selector.
+    Example: 'meta.score' -> "meta#>>'{score}'" (PostgreSQL syntax).
+    """
+    json_keys = json_keys or []
+    keys = keys or []
+
     if key == '*':
         return key
 
-    if key.find('.') == -1:
-        if len(keys) == 0:
+    # Handle simple keys (no dots)
+    if '.' not in key:
+        if not keys or key in keys:
             return key
-
-        if key in keys:
-            return key
-
+        # If not a known column, assume it's inside the 'data' JSON column
         if 'data' not in json_keys:
             return key
+        return format_key(f'data.{key}', val, json_keys=json_keys, keys=keys)
 
-        return format_key('data.' + key, val, json_keys=json_keys, keys=keys)
-
-    keys = key.split('.')
-    json_types = ['int', 'float', 'boolean', 'text']
+    # Handle nested keys
+    parts = key.split('.')
+    json_types = {'int', 'float', 'boolean', 'text'}
 
     prefix = ''
-
-    if keys[0] in json_keys:
-        prefix = keys[0]
-        keys = keys[1:]
-    elif keys[1] in json_keys:
-        prefix = keys[0] + '.' + keys[1]
-        keys = keys[2:]
+    if parts[0] in json_keys:
+        prefix = parts[0]
+        parts = parts[1:]
+    elif parts[1] in json_keys:
+        # Example: table.json_col.field
+        prefix = f'{parts[0]}.{parts[1]}'
+        parts = parts[2:]
     else:
         return key
 
+    # Check for type hint at the end (e.g., field.int)
     tp = ''
-    if keys[-1] in json_types:
-        tp = keys[-1]
-        keys = keys[:-1]
+    if parts[-1] in json_types:
+        tp = parts[-1]
+        parts = parts[:-1]
 
-    asName = ''
+    # Check for alias
+    as_name = ''
+    if 'as' in parts:
+        # Assumes syntax like: field.as.alias
+        as_idx = parts.index('as')
+        if as_idx + 1 < len(parts):
+            as_name = parts[as_idx + 1]
+            parts = parts[:as_idx]
 
-    if 'as' in keys:
-        asName = keys[-1]
-        keys = keys[:-2]
-
-    out = prefix + "#>>'{" + ', '.join(keys) + "}'"
+    # Construct PostgreSQL JSON path operator
+    out = f"{prefix}#>>'{{{', '.join(parts)}}}'"
 
     if not tp:
         tp = guess_type(val)
@@ -223,71 +253,73 @@ def format_key(
     if tp:
         out = f'cast({out} as {tp})'
 
-    if asName:
-        out = f'{out} as {asName}'
+    if as_name:
+        out = f'{out} as {as_name}'
 
     return out
 
 
 def format_fields(
     fields: List[str],
-    json_keys: List[str] = [],
-    keys: List[str] = [],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
 ) -> List[str]:
-    retval = []
-
-    for key in fields:
-        fkey = format_key(key.strip(), None, json_keys=json_keys, keys=keys)
-        retval.append(fkey)
-
-    return retval
+    """Formats a list of field names."""
+    return [
+        format_key(f.strip(), None, json_keys=json_keys, keys=keys)
+        for f in fields
+    ]
 
 
 def format_groups(
-    groups: str | None,
-    json_keys: List[str] = [],
-    keys: List[str] = [],
-) -> str | None:
+    groups: Optional[str],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Formats a comma-separated string of GROUP BY fields."""
     if not groups:
-        return groups
+        return None
 
-    retval = format_fields(groups.split(','), json_keys=json_keys, keys=keys)
-
-    return ','.join(retval)
+    formatted = format_fields(groups.split(','),
+                              json_keys=json_keys,
+                              keys=keys)
+    return ','.join(formatted)
 
 
 def format_sorts_one(
-    sorts: str | None,
-    json_keys: List[str] = [],
-    keys: List[str] = [],
-) -> str | None:
+    sorts: Optional[str],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Formats a single ORDER BY clause."""
     if not sorts:
-        return sorts
+        return None
 
+    # Split "column direction" (e.g., "age desc")
     idx = sorts.rfind(' ')
-
     if idx == -1:
         return format_groups(sorts, json_keys=json_keys, keys=keys)
 
     fsorts = format_groups(sorts[:idx], json_keys=json_keys, keys=keys)
     if not fsorts:
-        return fsorts
+        return None
+
     return fsorts + sorts[idx:]
 
 
 def format_sorts(
-    sorts: str | None,
-    json_keys: List[str] = [],
-    keys: List[str] = [],
-) -> str | None:
+    sorts: Optional[str],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Formats a comma-separated string of ORDER BY clauses."""
     if not sorts:
         return sorts
 
     items = sorts.split(',')
-
     retval = []
     for item in items:
-        one = format_sorts_one(item.strip())
+        one = format_sorts_one(item.strip(), json_keys=json_keys, keys=keys)
         if one:
             retval.append(one)
 
@@ -295,95 +327,112 @@ def format_sorts(
 
 
 def append_query(
-    query: List[tuple[str, str, Any]],
+    query: List[Tuple[str, str, Any]],
     key: str,
     val: Any,
-    json_keys: List[str] = [],
-    keys: List[str] = [],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
 ) -> None:
+    """Parses a key/value pair and appends it to the query list."""
     if val is None:
         return
 
+    # Handle IN clause for lists
     if isinstance(val, list):
-        vs = ['%s' for x in val]
-        if len(val) == 0:
+        if not val:
             raise EmptyRows()
+        vs = ['%s' for _ in val]
         fkey = format_key(key, val[0], json_keys=json_keys, keys=keys)
-        query.append((key, f'{fkey} in (' + ', '.join(vs) + ')', val))
+        query.append((key, f'{fkey} in ({", ".join(vs)})', val))
         return
 
-    m = re_op.search(key)
-
+    # Handle suffix operators (e.g., age_gt)
+    m = RE_OP.search(key)
     op = '='
     if m:
-        op = m.group(1)
-        key = key[:-len(op) - 1]
-        op = op_map[op]
+        op_suffix = m.group(1)
+        key = key[:-len(op_suffix) - 1]
+        op = OP_MAP[op_suffix]
 
+    # Handle IN clause for string-based values (subqueries or CSV)
     if op.strip() == 'in':
-        if val.lower().find('select') > -1:
+        if isinstance(val, str) and 'select' in val.lower():
+            # It's a subquery
             query.append((key, f'{key}{op}({val})', IGNORE))
         else:
-            val = [x.strip() for x in val.split(',')]
-            append_query(query, key, val, json_keys=json_keys, keys=keys)
+            # It's a CSV string
+            val_list = [x.strip() for x in str(val).split(',')]
+            append_query(query, key, val_list, json_keys=json_keys, keys=keys)
     else:
+        # Standard comparison
         fkey = format_key(key, val, json_keys=json_keys, keys=keys)
         query.append((key, f'{fkey}{op}%s', val))
 
 
 def sort_query(
-    query: List[tuple[str, str, Any]],
+    query: List[Tuple[str, str, Any]],
     sort_keys: List[str],
-) -> List[tuple[str, str, Any]]:
+) -> List[Tuple[str, str, Any]]:
+    """Reorders query parameters based on a priority list."""
     ret = []
+    other = []
+
+    # Extract keys in preference order
     for key in sort_keys:
-        other = []
         for q in query:
             if q[0] == key:
                 ret.append(q)
-            else:
-                other.append(q)
 
-        query = other
+    # Collect remaining keys
+    ret_keys = {q[0] for q in ret}
+    for q in query:
+        if q[0] not in ret_keys:
+            other.append(q)
 
-    return ret + query
+    return ret + other
 
 
 def record_query_to_sql(
-        query: List[tuple[str, str, Any]],
+        query: List[Tuple[str, str, Any]],
         part_sql: str = '',
-        args: Any = (),
-) -> tuple[str, Any]:
+        args: Tuple[Any, ...] = (),
+) -> Tuple[str, Tuple[Any, ...]]:
+    """Compiles the query list into a final SQL WHERE string and args."""
     new_part_sql = []
     new_args = []
+
     for q in query:
         new_part_sql.append(q[1])
-        if isinstance(q[2], list):
-            new_args += q[2]
-        else:
-            if q[2] == IGNORE:
-                continue
-            new_args.append(q[2])
+        val = q[2]
+        if isinstance(val, list):
+            new_args.extend(val)
+        elif val != IGNORE:
+            new_args.append(val)
 
     if part_sql:
         new_part_sql.append(part_sql)
 
-    if len(args) > 0:
-        for arg in args:
-            new_args.append(arg)
+    if args:
+        new_args.extend(args)
 
     return ' AND '.join(new_part_sql), tuple(new_args)
 
 
 def gen_query(
     *args: Any,
-    sort_keys: List[str] = [],
+    sort_keys: Optional[List[str]] = None,
     part_sql: str = '',
-    json_keys: List[str] = [],
-    keys: List[str] = [],
+    json_keys: Optional[List[str]] = None,
+    keys: Optional[List[str]] = None,
     **data: Any,
-) -> tuple[str, Any]:
-    query: List[tuple[str, str, Any]] = []
+) -> Tuple[str, Any]:
+    """Main entry point to generate SQL WHERE clauses from dict data."""
+    sort_keys = sort_keys or []
+    json_keys = json_keys or []
+    keys = keys or []
+
+    query: List[Tuple[str, str, Any]] = []
+
     for key, val in data.items():
         append_query(query, key, val, json_keys=json_keys, keys=keys)
 
@@ -399,17 +448,17 @@ def prepare_count(
     groups: Optional[str] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
+    """Prepares arguments for a COUNT query."""
     props: Dict[str, Any] = {}
 
-    part_sql, args = gen_query(*args, **kwargs)
+    part_sql, sql_args = gen_query(*args, **kwargs)
     props['part_sql'] = part_sql
-    props['args'] = args
+    props['args'] = sql_args
 
     json_keys = kwargs.get('json_keys', [])
     keys = kwargs.get('keys', [])
 
-    groups = format_groups(groups, json_keys=json_keys, keys=keys)
-    props['groups'] = groups
+    props['groups'] = format_groups(groups, json_keys=json_keys, keys=keys)
     props['join_sql'] = join_sql
     props['column'] = c(field)
 
@@ -418,45 +467,49 @@ def prepare_count(
 
 def prepare_get_list(
     *args: Any,
-    fields: List[str] = ['*'],
+    fields: Optional[List[str]] = None,
     join_sql: str = '',
     groups: Optional[str] = None,
     sorts: Optional[str] = 'id desc',
     **kwargs: Any,
 ) -> Dict[str, Any]:
+    """Prepares arguments for a SELECT list query."""
+    if fields is None:
+        fields = ['*']
+
     props: Dict[str, Any] = {}
 
-    part_sql, args = gen_query(*args, **kwargs)
+    part_sql, sql_args = gen_query(*args, **kwargs)
     props['part_sql'] = part_sql
-    props['args'] = args
+    props['args'] = sql_args
 
     json_keys = kwargs.get('json_keys', [])
     keys = kwargs.get('keys', [])
 
-    sorts = format_sorts(sorts, json_keys=json_keys, keys=keys)
-    groups = format_groups(groups, json_keys=json_keys, keys=keys)
-    fields = format_fields(fields, json_keys=json_keys, keys=keys)
+    props['sorts'] = format_sorts(sorts, json_keys=json_keys, keys=keys)
+    props['groups'] = format_groups(groups, json_keys=json_keys, keys=keys)
 
-    props['sorts'] = sorts
-    props['groups'] = groups
-    props['columns'] = cs(fields)
+    fmt_fields = format_fields(fields, json_keys=json_keys, keys=keys)
+    props['columns'] = cs(fmt_fields)
     props['join_sql'] = join_sql
 
     return props
 
 
 def popup_data(ret: Any) -> Any:
+    """Promotes keys inside a 'data' sub-dictionary to the top level."""
     if isinstance(ret, dict):
         data = ret.pop('data', None)
-
         if isinstance(data, dict):
             data.update(ret)
             return data
-
     return ret
 
 
-def make_data(data: Any, exclude_data_keys: List[str] = []) -> Any:
+def make_data(data: Dict[str, Any],
+              exclude_data_keys: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Moves non-excluded keys into a nested 'data' dictionary."""
+    exclude_data_keys = exclude_data_keys or []
     new = {}
 
     for k in exclude_data_keys:
@@ -469,33 +522,37 @@ def make_data(data: Any, exclude_data_keys: List[str] = []) -> Any:
 
 
 def prepare_get_by_uniq(
-    uniq_keys: List[str] = [],
-    optional_keys: List[str] = [],
+    uniq_keys: Optional[List[str]] = None,
+    optional_keys: Optional[List[str]] = None,
     required_uniq_keys: bool = True,
     ignore_extra_keys: bool = False,
-    fields: List[str] = ['*'],
+    fields: Optional[List[str]] = None,
     **data: Any,
-) -> tuple[bool, Dict[str, Any]]:
-    props: Dict[str, Any] = {}
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Prepares arguments to fetch a record by unique keys.
+    Returns (get_max_id_mode, props).
+    """
+    uniq_keys = uniq_keys or []
+    optional_keys = optional_keys or []
+    fields = fields or ['*']
 
+    props: Dict[str, Any] = {}
     part_sql = []
     args = []
 
-    if len(uniq_keys) == 0:
+    if not uniq_keys:
         if required_uniq_keys:
             if ignore_extra_keys:
                 raise EmptyRows()
-            else:
-                raise Exception('uniq_keys is required')
+            raise Exception('uniq_keys is required')
 
     get_max_id = False
     for key in uniq_keys:
         val = data.pop(key, None)
         if val is None:
             get_max_id = True
-            if required_uniq_keys:
-                if key in optional_keys:
-                    continue
+            if required_uniq_keys and key not in optional_keys:
                 raise Exception(f'{key} is required')
 
         part_sql.append(f'{key}=%s')
@@ -504,28 +561,25 @@ def prepare_get_by_uniq(
     if not ignore_extra_keys:
         append_extra(part_sql, args, data)
 
-    if get_max_id:
-
-        part_sql_s = ' AND '.join(part_sql)
-        props['column'] = c('max(id)')
-        props['part_sql'] = part_sql_s
-        props['args'] = args
-        return True, props
-
-    part_sql_s = ' AND '.join(part_sql)
-    props['columns'] = cs(fields)
-    props['part_sql'] = part_sql_s
+    props['part_sql'] = ' AND '.join(part_sql)
     props['args'] = args
 
+    if get_max_id:
+        props['column'] = c('max(id)')
+        return True, props
+
+    props['columns'] = cs(fields)
     return False, props
 
 
 def prepare_get_by_id(
     id: Optional[int] = None,
-    fields: List[str] = ['*'],
+    fields: Optional[List[str]] = None,
     ignore_extra_keys: bool = False,
     **data: Any,
 ) -> Dict[str, Any]:
+    """Prepares arguments to fetch a record by primary key (id)."""
+    fields = fields or ['*']
     props: Dict[str, Any] = {}
     part_sql = []
     args = []
@@ -536,10 +590,8 @@ def prepare_get_by_id(
     if not ignore_extra_keys:
         append_extra(part_sql, args, data)
 
-    part_sql_s = ' AND '.join(part_sql)
-
     props['columns'] = cs(fields)
-    props['part_sql'] = part_sql_s
+    props['part_sql'] = ' AND '.join(part_sql)
     props['args'] = args
 
     return props

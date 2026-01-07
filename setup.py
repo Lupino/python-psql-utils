@@ -1,11 +1,10 @@
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
+from setuptools import setup
 
-packages = ['psql_utils']
-
-requires = ['psycopg[binary,pool]', 'mypy_extensions']
+# Define runtime dependencies
+# Psycopg 3 with binary drivers and connection pool support
+REQUIRES = [
+    'psycopg[binary,pool]',
+]
 
 setup(
     name='psql_utils',
@@ -14,9 +13,20 @@ setup(
     author='Li Meng Jun',
     author_email='lmjubuntu@gmail.com',
     url='https://github.com/Lupino/python-psql-utils',
-    packages=packages,
+    packages=['psql_utils'],
+    # Include the marker file for PEP 561 (Type Hinting) compliance
     package_data={"psql_utils": ["py.typed"]},
+    # explicit package mapping
     package_dir={'psql_utils': 'psql_utils'},
     include_package_data=True,
-    install_requires=requires,
+    install_requires=REQUIRES,
+    # Minimum Python version (aligned with pyproject.toml)
+    python_requires='>=3.8',
+    # Classifiers metadata for PyPI indexing
+    classifiers=[
+        'Programming Language :: Python :: 3',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: OS Independent',
+        'Topic :: Database',
+    ],
 )
