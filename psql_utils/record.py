@@ -29,7 +29,7 @@ async def get(
     optional_keys = optional_keys or []
     fields = fields or ['*']
 
-    if id:
+    if id is not None:
         props = prepare_get_by_id(
             id=id,
             fields=fields,
@@ -98,7 +98,7 @@ async def save(
     exclude_data_keys = exclude_data_keys or []
 
     # Determine if we are updating an existing record
-    if id:
+    if id is not None:
         old = await get(table, id=id)
         if not old:
             raise Exception(f'Update failed: record [{id}] does not exist')

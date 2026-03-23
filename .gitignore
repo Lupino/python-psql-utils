@@ -1,0 +1,15 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Tooling cache
+.mypy_cache/
+.pytest_cache/
+
+# OS files
+.DS_Store

@@ -23,7 +23,7 @@ OP_MAP = {
 
 # Regex to detect operators at the end of a key (e.g., '_gt')
 RE_OP = re.compile('_(' + '|'.join(OP_MAP.keys()) + ')$')
-RE_NUM = re.compile(r'^\d+(.\d+)?$')
+RE_NUM = re.compile(r'^\d+(\.\d+)?$')
 
 IGNORE = '__IGNORE__'
 
@@ -48,6 +48,11 @@ def merge_sub_json(
     replace_keys: Optional[List[str]] = None,
 ) -> Any:
     """Merges specific sub-dictionaries, skipping keys in replace_keys."""
+    if not isinstance(data0, dict):
+        return data0
+    if not isinstance(data1, dict):
+        return data0
+
     if replace_keys is None:
         replace_keys = []
 
@@ -337,6 +342,14 @@ def append_query(
     if val is None:
         return
 
+    # Handle suffix operators (e.g., age_gt)
+    m = RE_OP.search(key)
+    op = '='
+    if m:
+        op_suffix = m.group(1)
+        key = key[:-len(op_suffix) - 1]
+        op = OP_MAP[op_suffix]
+
     # Handle IN clause for lists
     if isinstance(val, list):
         if not val:
@@ -346,19 +359,12 @@ def append_query(
         query.append((key, f'{fkey} in ({", ".join(vs)})', val))
         return
 
-    # Handle suffix operators (e.g., age_gt)
-    m = RE_OP.search(key)
-    op = '='
-    if m:
-        op_suffix = m.group(1)
-        key = key[:-len(op_suffix) - 1]
-        op = OP_MAP[op_suffix]
-
     # Handle IN clause for string-based values (subqueries or CSV)
     if op.strip() == 'in':
         if isinstance(val, str) and 'select' in val.lower():
             # It's a subquery
-            query.append((key, f'{key}{op}({val})', IGNORE))
+            fkey = format_key(key, val, json_keys=json_keys, keys=keys)
+            query.append((key, f'{fkey}{op}({val})', IGNORE))
         else:
             # It's a CSV string
             val_list = [x.strip() for x in str(val).split(',')]
@@ -554,6 +560,9 @@ def prepare_get_by_uniq(
             get_max_id = True
             if required_uniq_keys and key not in optional_keys:
                 raise Exception(f'{key} is required')
+            # Missing optional unique keys should not force "key = NULL"
+            # in WHERE clause; they are intentionally omitted.
+            continue
 
         part_sql.append(f'{key}=%s')
         args.append(val)
