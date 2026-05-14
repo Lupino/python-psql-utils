@@ -6,7 +6,7 @@ from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 
 from .types import TableName, Column, IndexName, c
-from . import gen_sql as gen
+from . import gen
 
 
 class PGConnectorError(Exception):
