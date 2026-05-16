@@ -139,11 +139,40 @@ def run_with_pool(
     return decorator
 
 
-async def fixed_execute(cur: AsyncCursor, sql: str, args: Any = None) -> Any:
-    """Helper to execute SQL with optional arguments."""
+async def fixed_execute(
+    cur: AsyncCursor,
+    sql: str,
+    args: Any = None,
+    fetch: str = '',
+    as_dict: bool = False,
+) -> Any:
+    """Execute SQL; optionally fetch one/all rows and map rows to dict."""
     if args and len(args) > 0:
-        return await cur.execute(sql, args)
-    return await cur.execute(sql)
+        await cur.execute(sql, args)
+    else:
+        await cur.execute(sql)
+    if fetch == 'one':
+        ret = await cur.fetchone()
+        if not ret:
+            return None
+        if not as_dict:
+            return ret
+        if isinstance(ret, dict):
+            return dict(ret)
+        cols = [d.name for d in (cur.description or [])]
+        return dict(zip(cols, ret))
+    if fetch == 'all':
+        rows = await cur.fetchall()
+        if not as_dict:
+            return rows
+        if not rows:
+            return []
+        first = rows[0]
+        if isinstance(first, dict):
+            return [dict(row) for row in rows]
+        cols = [d.name for d in (cur.description or [])]
+        return [dict(zip(cols, row)) for row in rows]
+    return cur
 
 
 @run_with_pool()
@@ -179,11 +208,17 @@ async def create_index(
     await fixed_execute(cur, sql)
 
 
-async def get_only_default(cur: AsyncCursor, default: Any) -> Any:
+async def get_only_default(
+    cur: AsyncCursor,
+    default: Any,
+    key: Optional[str] = None,
+) -> Any:
     """Fetches a single value or returns a default."""
     ret = await cur.fetchone()
     if ret is None:
         return default
+    if key and isinstance(ret, dict):
+        return ret.get(key, default)
     return ret[0]
 
 
@@ -195,6 +230,8 @@ async def insert(
     args: Any,
     ret_column: Optional[Column] = None,
     ret_def: Optional[Any] = None,
+    required: bool = False,
+    err_msg: str = 'insert failed',
 ) -> Any:
     """Executes an INSERT statement and optionally returns a value."""
     sql = gen.gen_insert(
@@ -205,7 +242,11 @@ async def insert(
     await fixed_execute(cur, sql, args)
 
     if ret_column:
-        return await get_only_default(cur, ret_def)
+        ret = await get_only_default(cur, ret_def)
+        if required and not ret:
+            raise Exception(err_msg)
+        return ret
+    return None
 
 
 @run_with_pool()
@@ -310,8 +351,13 @@ async def select(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
-) -> List[Dict[str, Any]]:
+    one: bool = False,
+    required: bool = False,
+    err_msg: str = 'select result is empty',
+) -> Any:
     """Executes a SELECT query and returns a list of dictionaries."""
+    if one and size is None:
+        size = 1
     sql = gen.gen_select(
         table_name=table_name,
         columns=columns,
@@ -324,7 +370,15 @@ async def select(
     )
     await fixed_execute(cur, sql, args)
     ret = await cur.fetchall()
-    return [dict(x) for x in ret]
+    rows = [dict(x) for x in ret]
+    if one:
+        first = rows[0] if rows else None
+        if required and not first:
+            raise Exception(err_msg)
+        return first
+    if required and not rows:
+        raise Exception(err_msg)
+    return rows
 
 
 async def select_only(
@@ -370,11 +424,7 @@ async def select_one(
         part_sql=part_sql,
         join_sql=join_sql,
     )
-    await fixed_execute(cur, sql, args)
-    ret = await cur.fetchone()
-    if ret:
-        return dict(ret)
-    return None
+    return await fixed_execute(cur, sql, args, fetch='one', as_dict=True)
 
 
 async def select_one_only(

@@ -134,11 +134,40 @@ def run_with_pool(
     return decorator
 
 
-def fixed_execute(cur: Cursor, sql: str, args: Any = None) -> Any:
-    """Helper to execute SQL with optional arguments."""
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: str = '',
+    as_dict: bool = False,
+) -> Any:
+    """Execute SQL; optionally fetch one/all rows and map rows to dict."""
     if args and len(args) > 0:
-        return cur.execute(sql, args)
-    return cur.execute(sql)
+        cur.execute(sql, args)
+    else:
+        cur.execute(sql)
+    if fetch == 'one':
+        ret = cur.fetchone()
+        if not ret:
+            return None
+        if not as_dict:
+            return ret
+        if isinstance(ret, dict):
+            return dict(ret)
+        cols = [d.name for d in (cur.description or [])]
+        return dict(zip(cols, ret))
+    if fetch == 'all':
+        rows = cur.fetchall()
+        if not as_dict:
+            return rows
+        if not rows:
+            return []
+        first = rows[0]
+        if isinstance(first, dict):
+            return [dict(row) for row in rows]
+        cols = [d.name for d in (cur.description or [])]
+        return [dict(zip(cols, row)) for row in rows]
+    return cur
 
 
 @run_with_pool()
@@ -174,11 +203,17 @@ def create_index(
     fixed_execute(cur, sql)
 
 
-def get_only_default(cur: Cursor, default: Any) -> Any:
+def get_only_default(
+    cur: Cursor,
+    default: Any,
+    key: Optional[str] = None,
+) -> Any:
     """Fetches a single value or returns a default."""
     ret = cur.fetchone()
     if ret is None:
         return default
+    if key and isinstance(ret, dict):
+        return ret.get(key, default)
     return ret[0]
 
 
@@ -190,6 +225,8 @@ def insert(
     args: Any,
     ret_column: Optional[Column] = None,
     ret_def: Optional[Any] = None,
+    required: bool = False,
+    err_msg: str = 'insert failed',
 ) -> Any:
     """Executes an INSERT statement and optionally returns a value."""
     sql = gen.gen_insert(
@@ -200,7 +237,11 @@ def insert(
     fixed_execute(cur, sql, args)
 
     if ret_column:
-        return get_only_default(cur, ret_def)
+        ret = get_only_default(cur, ret_def)
+        if required and not ret:
+            raise Exception(err_msg)
+        return ret
+    return None
 
 
 @run_with_pool()
@@ -305,8 +346,13 @@ def select(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
-) -> List[Dict[str, Any]]:
+    one: bool = False,
+    required: bool = False,
+    err_msg: str = 'select result is empty',
+) -> Any:
     """Executes a SELECT query and returns a list of dictionaries."""
+    if one and size is None:
+        size = 1
     sql = gen.gen_select(
         table_name=table_name,
         columns=columns,
@@ -319,7 +365,15 @@ def select(
     )
     fixed_execute(cur, sql, args)
     ret = cur.fetchall()
-    return [dict(x) for x in ret]
+    rows = [dict(x) for x in ret]
+    if one:
+        first = rows[0] if rows else None
+        if required and not first:
+            raise Exception(err_msg)
+        return first
+    if required and not rows:
+        raise Exception(err_msg)
+    return rows
 
 
 def select_only(
@@ -364,11 +418,7 @@ def select_one(
         part_sql=part_sql,
         join_sql=join_sql,
     )
-    fixed_execute(cur, sql, args)
-    ret = cur.fetchone()
-    if ret:
-        return dict(ret)
-    return None
+    return fixed_execute(cur, sql, args, fetch='one', as_dict=True)
 
 
 def select_one_only(
