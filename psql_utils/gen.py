@@ -171,14 +171,16 @@ def gen_select(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
+    lock_sql: str = '',
 ) -> str:
     """Generates a SELECT statement."""
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
     limit_sql = f' LIMIT {size}' if size is not None else ''
     offset_sql = f' OFFSET {offset}' if offset is not None else ''
+    lock_sql = f' {lock_sql}' if lock_sql else ''
 
-    return "SELECT {} FROM {}{}{} {}{}{}".format(
+    return "SELECT {} FROM {}{}{} {}{}{}{}".format(
         columns_to_string(columns),
         get_table_name(table_name),
         join_sql,
@@ -186,6 +188,7 @@ def gen_select(
         format_group_and_sort_sql(groups, sorts),
         limit_sql,
         offset_sql,
+        lock_sql,
     )
 
 
@@ -198,6 +201,7 @@ def gen_select_only(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
+    lock_sql: str = '',
 ) -> str:
     """Wrapper for gen_select to select a single column."""
     return gen_select(
@@ -209,6 +213,7 @@ def gen_select_only(
         groups=groups,
         sorts=sorts,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
 
 
@@ -217,16 +222,19 @@ def gen_select_one(
     columns: List[Column],
     part_sql: str = '',
     join_sql: str = '',
+    lock_sql: str = '',
 ) -> str:
     """Wrapper for gen_select to limit result to 1."""
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
+    lock_sql = f' {lock_sql}' if lock_sql else ''
 
-    return "SELECT {} FROM {}{}{} LIMIT 1".format(
+    return "SELECT {} FROM {}{}{} LIMIT 1{}".format(
         columns_to_string(columns),
         get_table_name(table_name),
         join_sql,
         where_sql,
+        lock_sql,
     )
 
 
@@ -235,6 +243,7 @@ def gen_select_one_only(
     column: Column,
     part_sql: str = '',
     join_sql: str = '',
+    lock_sql: str = '',
 ) -> str:
     """Wrapper for gen_select_one to select a single column."""
     return gen_select_one(
@@ -242,6 +251,7 @@ def gen_select_one_only(
         columns=[column],
         part_sql=part_sql,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
 
 

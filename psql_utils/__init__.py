@@ -243,7 +243,7 @@ async def insert(
 
     if ret_column:
         ret = await get_only_default(cur, ret_def)
-        if required and not ret:
+        if required and ret is None:
             raise Exception(err_msg)
         return ret
     return None
@@ -351,6 +351,7 @@ async def select(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
+    lock_sql: str = '',
     one: bool = False,
     required: bool = False,
     err_msg: str = 'select result is empty',
@@ -367,6 +368,7 @@ async def select(
         groups=groups,
         sorts=sorts,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
     await fixed_execute(cur, sql, args)
     ret = await cur.fetchall()
@@ -391,6 +393,7 @@ async def select_only(
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
+    lock_sql: str = '',
 ) -> List[Any]:
     """Wraps select to return a list of single values (e.g. list of IDs)."""
     ret = await select(
@@ -404,6 +407,7 @@ async def select_only(
         groups=groups,
         sorts=sorts,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
     return [list(x.values())[0] for x in ret]
 
@@ -416,6 +420,7 @@ async def select_one(
         part_sql: str = '',
         args: Any = (),
         join_sql: str = '',
+        lock_sql: str = '',
 ) -> Optional[Dict[str, Any]]:
     """Executes a SELECT query with LIMIT 1."""
     sql = gen.gen_select_one(
@@ -423,6 +428,7 @@ async def select_one(
         columns=columns,
         part_sql=part_sql,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
     return await fixed_execute(cur, sql, args, fetch='one', as_dict=True)
 
@@ -433,6 +439,7 @@ async def select_one_only(
         part_sql: str = '',
         args: Any = (),
         join_sql: str = '',
+        lock_sql: str = '',
 ) -> Any:
     """Wraps select_one to return a single scalar value."""
     ret = await select_one(
@@ -442,6 +449,7 @@ async def select_one_only(
         part_sql=part_sql,
         args=args,
         join_sql=join_sql,
+        lock_sql=lock_sql,
     )
     if ret:
         return list(ret.values())[0]
