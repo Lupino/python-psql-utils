@@ -92,3 +92,26 @@ def build_crud(
         get_kwargs=get_kwargs,
         query_kwargs=query_kwargs,
     )
+
+
+def build_crud_exports(
+    table: TableName,
+    *,
+    keys: Optional[List[str]] = None,
+    uniq_keys: Optional[List[str]] = None,
+    json_keys: Optional[List[str]] = None,
+    save_kwargs: Optional[Dict[str, Any]] = None,
+    get_kwargs: Optional[Dict[str, Any]] = None,
+    query_kwargs: Optional[Dict[str, Any]] = None,
+) -> tuple[CRUD, Any, Any, Any, Any, Any]:
+    """Build CRUD and return common bound methods as a tuple."""
+    crud = build_crud(
+        table,
+        keys=keys,
+        uniq_keys=uniq_keys,
+        json_keys=json_keys,
+        save_kwargs=save_kwargs,
+        get_kwargs=get_kwargs,
+        query_kwargs=query_kwargs,
+    )
+    return crud, crud.save, crud.get, crud.get_list, crud.count, crud.remove
