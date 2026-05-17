@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from . import record
 from .types import TableName
@@ -72,6 +72,12 @@ class CRUD:
         )
 
 
+CrudMethod = Callable[..., Awaitable[Any]]
+CrudExports = tuple[
+    CRUD, CrudMethod, CrudMethod, CrudMethod, CrudMethod, CrudMethod
+]
+
+
 def build_crud(
     table: TableName,
     *,
@@ -103,7 +109,7 @@ def build_crud_exports(
     save_kwargs: Optional[Dict[str, Any]] = None,
     get_kwargs: Optional[Dict[str, Any]] = None,
     query_kwargs: Optional[Dict[str, Any]] = None,
-) -> tuple[CRUD, Any, Any, Any, Any, Any]:
+) -> CrudExports:
     """Build CRUD and return common bound methods as a tuple."""
     crud = build_crud(
         table,

@@ -24,6 +24,7 @@ OP_MAP = {
 # Regex to detect operators at the end of a key (e.g., '_gt')
 RE_OP = re.compile('_(' + '|'.join(OP_MAP.keys()) + ')$')
 RE_NUM = re.compile(r'^\d+(\.\d+)?$')
+RE_UNSAFE_SQL = re.compile(r';|--|/\*|\*/')
 
 IGNORE = '__IGNORE__'
 
@@ -32,6 +33,21 @@ class EmptyRows(Exception):
     """Exception raised when a query should return no rows
     (e.g., empty IN clause)."""
     pass
+
+
+def validate_sql_fragment(
+    name: str,
+    sql: str,
+    *,
+    must_start_select: bool = False,
+) -> None:
+    """Rejects obviously unsafe raw SQL fragments."""
+    if '\x00' in sql:
+        raise ValueError(f'{name} contains null byte')
+    if RE_UNSAFE_SQL.search(sql):
+        raise ValueError(f'{name} contains unsafe token')
+    if must_start_select and not sql.strip().lower().startswith('select '):
+        raise ValueError(f'{name} must start with SELECT')
 
 
 def merge_json(new: Any, old: Any) -> Any:
@@ -363,6 +379,11 @@ def append_query(
     if op.strip() == 'in':
         if isinstance(val, str) and 'select' in val.lower():
             # It's a subquery
+            validate_sql_fragment(
+                f'subquery for "{key}_in"',
+                val,
+                must_start_select=True,
+            )
             fkey = format_key(key, val, json_keys=json_keys, keys=keys)
             query.append((key, f'{fkey}{op}({val})', IGNORE))
         else:
@@ -416,6 +437,7 @@ def record_query_to_sql(
             new_args.append(val)
 
     if part_sql:
+        validate_sql_fragment('part_sql', part_sql)
         new_part_sql.append(part_sql)
 
     if args:
@@ -457,6 +479,11 @@ def prepare_count(
     """Prepares arguments for a COUNT query."""
     props: Dict[str, Any] = {}
 
+    if join_sql:
+        validate_sql_fragment('join_sql', join_sql)
+    if groups:
+        validate_sql_fragment('groups', groups)
+
     part_sql, sql_args = gen_query(*args, **kwargs)
     props['part_sql'] = part_sql
     props['args'] = sql_args
@@ -480,6 +507,13 @@ def prepare_get_list(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """Prepares arguments for a SELECT list query."""
+    if join_sql:
+        validate_sql_fragment('join_sql', join_sql)
+    if groups:
+        validate_sql_fragment('groups', groups)
+    if sorts:
+        validate_sql_fragment('sorts', sorts)
+
     if fields is None:
         fields = ['*']
 

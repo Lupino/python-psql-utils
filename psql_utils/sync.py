@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, cast
 
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
@@ -152,8 +152,9 @@ def fixed_execute(
             return None
         if not as_dict:
             return ret
-        if isinstance(ret, dict):
-            return dict(ret)
+        ret_any: Any = ret
+        if isinstance(ret_any, dict):
+            return dict(ret_any)
         cols = [d.name for d in (cur.description or [])]
         return dict(zip(cols, ret))
     if fetch == 'all':
@@ -163,7 +164,8 @@ def fixed_execute(
         if not rows:
             return []
         first = rows[0]
-        if isinstance(first, dict):
+        first_any: Any = first
+        if isinstance(first_any, dict):
             return [dict(row) for row in rows]
         cols = [d.name for d in (cur.description or [])]
         return [dict(zip(cols, row)) for row in rows]
@@ -212,8 +214,9 @@ def get_only_default(
     ret = cur.fetchone()
     if ret is None:
         return default
-    if key and isinstance(ret, dict):
-        return ret.get(key, default)
+    ret_any: Any = ret
+    if key and isinstance(ret_any, dict):
+        return ret_any.get(key, default)
     return ret[0]
 
 
@@ -424,7 +427,10 @@ def select_one(
         join_sql=join_sql,
         lock_sql=lock_sql,
     )
-    return fixed_execute(cur, sql, args, fetch='one', as_dict=True)
+    return cast(
+        Optional[Dict[str, Any]],
+        fixed_execute(cur, sql, args, fetch='one', as_dict=True),
+    )
 
 
 def select_one_only(

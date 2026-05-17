@@ -1,7 +1,18 @@
+import re
 from typing import Optional, List, Any, Tuple
 
 from .types import (TableName, Column, IndexName, get_table_name,
                     columns_to_string, get_index_name)
+
+
+RE_UNSAFE_SQL = re.compile(r';|--|/\*|\*/')
+
+
+def _validate_sql_fragment(name: str, sql: str) -> None:
+    if '\x00' in sql:
+        raise ValueError(f'{name} contains null byte')
+    if RE_UNSAFE_SQL.search(sql):
+        raise ValueError(f'{name} contains unsafe token')
 
 
 def gen_create_table(
@@ -109,6 +120,8 @@ def gen_update(
     part_sql: str = '',
 ) -> str:
     """Generates an UPDATE statement."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
     set_sql = ', '.join([append_update_set(x) for x in columns])
     where_sql = f' WHERE {part_sql}' if part_sql else ''
 
@@ -120,6 +133,8 @@ def gen_delete(
     part_sql: str = '',
 ) -> str:
     """Generates a DELETE statement."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     return f'DELETE FROM {get_table_name(table_name)}{where_sql}'
 
@@ -131,6 +146,10 @@ def gen_sum(
         join_sql: str = '',
 ) -> str:
     """Generates a SELECT SUM(...) statement."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
+    if join_sql:
+        _validate_sql_fragment('join_sql', join_sql)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
 
@@ -150,6 +169,12 @@ def gen_count(
     groups: Optional[str] = None,
 ) -> str:
     """Generates a SELECT COUNT(...) statement."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
+    if join_sql:
+        _validate_sql_fragment('join_sql', join_sql)
+    if groups:
+        _validate_sql_fragment('groups', groups)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
 
@@ -174,6 +199,16 @@ def gen_select(
     lock_sql: str = '',
 ) -> str:
     """Generates a SELECT statement."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
+    if join_sql:
+        _validate_sql_fragment('join_sql', join_sql)
+    if groups:
+        _validate_sql_fragment('groups', groups)
+    if sorts:
+        _validate_sql_fragment('sorts', sorts)
+    if lock_sql:
+        _validate_sql_fragment('lock_sql', lock_sql)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
     limit_sql = f' LIMIT {size}' if size is not None else ''
@@ -225,6 +260,12 @@ def gen_select_one(
     lock_sql: str = '',
 ) -> str:
     """Wrapper for gen_select to limit result to 1."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
+    if join_sql:
+        _validate_sql_fragment('join_sql', join_sql)
+    if lock_sql:
+        _validate_sql_fragment('lock_sql', lock_sql)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     join_sql = f' {join_sql} ' if join_sql else ''
     lock_sql = f' {lock_sql}' if lock_sql else ''
@@ -280,6 +321,12 @@ def gen_group_count(
     sorts: Optional[str] = None,
 ) -> str:
     """Generates a count of rows in a subquery."""
+    if part_sql:
+        _validate_sql_fragment('part_sql', part_sql)
+    if groups:
+        _validate_sql_fragment('groups', groups)
+    if sorts:
+        _validate_sql_fragment('sorts', sorts)
     where_sql = f' WHERE {part_sql}' if part_sql else ''
     group_sort = format_group_and_sort_sql(groups, sorts)
 

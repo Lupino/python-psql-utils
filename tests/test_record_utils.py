@@ -5,6 +5,7 @@ from typing import Any
 from psql_utils.record_utils import (
     gen_query,
     guess_type,
+    prepare_get_list,
     prepare_get_by_uniq,
     prepare_save,
 )
@@ -88,6 +89,14 @@ class RecordUtilsTests(unittest.TestCase):
         )
         self.assertEqual(sql, "cast(data#>>'{user_id}' as int) in (%s, %s)")
         self.assertEqual(args, (1, 2))
+
+    def test_gen_query_in_subquery_rejects_unsafe_tokens(self) -> None:
+        with self.assertRaises(ValueError):
+            gen_query(user_id_in="select id from users; drop table users")
+
+    def test_prepare_get_list_rejects_unsafe_sorts(self) -> None:
+        with self.assertRaises(ValueError):
+            prepare_get_list(sorts="id desc; drop table users")
 
     def test_prepare_get_by_uniq_omits_missing_optional_keys(self) -> None:
         get_max_id, props = prepare_get_by_uniq(
