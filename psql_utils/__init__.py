@@ -10,6 +10,7 @@ from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
+from .errors import QueryResultError
 
 
 class PGConnectorError(Exception):
@@ -283,7 +284,7 @@ async def insert(
     if ret_column:
         ret = await get_only_default(cur, ret_def)
         if required and ret is None:
-            raise Exception(err_msg)
+            raise QueryResultError(err_msg)
         return ret
     return None
 
@@ -416,10 +417,10 @@ async def select(
     if one:
         first = rows[0] if rows else None
         if required and not first:
-            raise Exception(err_msg)
+            raise QueryResultError(err_msg)
         return first
     if required and not rows:
-        raise Exception(err_msg)
+        raise QueryResultError(err_msg)
     return rows
 
 

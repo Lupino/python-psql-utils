@@ -4,6 +4,7 @@ from time import time
 from typing import Optional, List, Dict, Any, Tuple
 
 from .types import c, cs
+from .errors import ValidationError
 
 # Operator mapping for SQL generation (e.g., 'age_gt' -> 'age > %s')
 OP_MAP = {
@@ -585,7 +586,7 @@ def prepare_get_by_uniq(
         if required_uniq_keys:
             if ignore_extra_keys:
                 raise EmptyRows()
-            raise Exception('uniq_keys is required')
+            raise ValidationError('uniq_keys is required')
 
     get_max_id = False
     for key in uniq_keys:
@@ -593,7 +594,7 @@ def prepare_get_by_uniq(
         if val is None:
             get_max_id = True
             if required_uniq_keys and key not in optional_keys:
-                raise Exception(f'{key} is required')
+                raise ValidationError(f'{key} is required')
             # Missing optional unique keys should not force "key = NULL"
             # in WHERE clause; they are intentionally omitted.
             continue

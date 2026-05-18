@@ -3,10 +3,11 @@ from typing import Optional, List, Any, Callable
 
 from .sync import (select_one_only, select_one, select, count as pg_count,
                    update, insert, delete)
+from ._record_shared import normalize_get_inputs, normalize_save_inputs, prepare_get_props
+from .errors import RecordNotFoundError, UniqueConflictError
 from .types import TableName, c, cs
 from .record_utils import (popup_data, EmptyRows, get_uniq_data, prepare_count,
-                           prepare_get_list, prepare_save, prepare_get_by_uniq,
-                           prepare_get_by_id)
+                           prepare_get_list, prepare_save, prepare_get_by_id)
 
 
 def get(
@@ -24,42 +25,35 @@ def get(
     """
     Retrieves a single record synchronously by ID or unique keys.
     """
-    uniq_keys = uniq_keys or []
-    optional_keys = optional_keys or []
-    fields = fields or ['*']
+    uniq_keys, optional_keys, fields = normalize_get_inputs(
+        uniq_keys,
+        optional_keys,
+        fields,
+    )
+    prepared = prepare_get_props(
+        id=id,
+        uniq_keys=uniq_keys,
+        optional_keys=optional_keys,
+        required_uniq_keys=required_uniq_keys,
+        ignore_extra_keys=ignore_extra_keys,
+        fields=fields,
+        data=data,
+    )
+    if prepared is None:
+        return None
+    get_max_id, props = prepared
 
-    if id is not None:
+    # Special case: if fetching max(id), resolve it to a specific ID first
+    if get_max_id:
+        id_val = select_one_only(table, **props)
+        if not id_val:
+            return None
         props = prepare_get_by_id(
-            id=id,
+            id=id_val,
             fields=fields,
             ignore_extra_keys=ignore_extra_keys,
             **data,
         )
-    else:
-        try:
-            get_max_id, props = prepare_get_by_uniq(
-                uniq_keys=uniq_keys,
-                optional_keys=optional_keys,
-                required_uniq_keys=required_uniq_keys,
-                ignore_extra_keys=ignore_extra_keys,
-                fields=fields,
-                **data,
-            )
-        except EmptyRows:
-            return None
-
-        # Special case: if fetching max(id), resolve it to a specific ID first
-        if get_max_id:
-            id_val = select_one_only(table, **props)
-            if not id_val:
-                return None
-
-            props = prepare_get_by_id(
-                id=id_val,
-                fields=fields,
-                ignore_extra_keys=ignore_extra_keys,
-                **data,
-            )
 
     ret = select_one(table, **props)
 
@@ -88,19 +82,29 @@ def save(
     - If 'id' is provided, attempts an update.
     - If not, uses unique keys to determine if it should insert or update.
     """
-    keys = keys or []
-    uniq_keys = uniq_keys or []
-    optional_keys = optional_keys or []
-    json_keys = json_keys or []
-    sub_json_keys = sub_json_keys or []
-    replace_keys = replace_keys or []
-    exclude_data_keys = exclude_data_keys or []
+    (
+        keys,
+        uniq_keys,
+        optional_keys,
+        json_keys,
+        sub_json_keys,
+        replace_keys,
+        exclude_data_keys,
+    ) = normalize_save_inputs(
+        keys,
+        uniq_keys,
+        optional_keys,
+        json_keys,
+        sub_json_keys,
+        replace_keys,
+        exclude_data_keys,
+    )
 
     # Determine existing record for Update vs Insert logic
     if id is not None:
         old = get(table, id=id)
         if not old:
-            raise Exception(f'Update failed: record [{id}] does not exist')
+            raise RecordNotFoundError(f'Update failed: record [{id}] does not exist')
     else:
         _, uniq_data = get_uniq_data(uniq_keys=uniq_keys, **data)
         old = get(
@@ -142,7 +146,7 @@ def save(
             )
             if existing_conflict:
                 oid = existing_conflict['id']
-                raise Exception(
+                raise UniqueConflictError(
                     f'Cannot update: unique value conflicts with record {oid}')
 
         # Optimization: Return early if no data changed
