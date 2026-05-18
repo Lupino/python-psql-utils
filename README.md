@@ -134,7 +134,37 @@ Important behavior:
 
 - `select` / `select_one` return dict rows (`dict_row` cursor factory).
 - `required=True` on `insert`/`select` raises `QueryResultError` when result constraints are not met.
-- `run_with_pool` allows passing `cur=` manually to reuse an existing cursor/transaction context.
+- `run_with_pool` can reuse a scoped cursor from `with_cursor(...)`.
+
+## Cursor Context Propagation (`with_cursor`)
+
+When you already have a cursor in an upper layer (for example inside a
+transaction), propagate it downward with `with_cursor(...)`. Any nested
+`@run_with_pool` function will reuse that cursor.
+
+Async:
+
+```python
+import psql_utils as pg
+
+async with conn.cursor() as cur:
+    async with pg.with_cursor(cur):
+        await pg.insert(...)
+        await pg.update(...)
+        await some_service_fn(...)  # nested run_with_pool calls reuse cur
+```
+
+Sync:
+
+```python
+import psql_utils.sync as pg
+
+with conn.cursor() as cur:
+    with pg.with_cursor(cur):
+        pg.insert(...)
+        pg.update(...)
+        some_service_fn()  # nested run_with_pool calls reuse cur
+```
 
 ## Record API
 

@@ -1,4 +1,6 @@
 from functools import wraps
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import (
     Any,
     Optional,
@@ -10,7 +12,7 @@ from typing import (
     overload,
     cast,
 )
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
@@ -80,6 +82,10 @@ class PGConnector:
 _connector: Optional[PGConnector] = None
 # List of callbacks to run upon successful connection
 _connected_events: list[Callable[[], Awaitable[object]]] = []
+_current_cursor: ContextVar[AsyncCursor | None] = ContextVar(
+    "psql_utils_async_current_cursor",
+    default=None,
+)
 
 
 def get_connector() -> PGConnector:
@@ -115,6 +121,16 @@ async def close() -> None:
     await pool.close()
 
 
+@asynccontextmanager
+async def with_cursor(cur: AsyncCursor) -> AsyncIterator[AsyncCursor]:
+    """Set the current cursor for nested run_with_pool() calls."""
+    token = _current_cursor.set(cur)
+    try:
+        yield cur
+    finally:
+        _current_cursor.reset(token)
+
+
 FixedExecuteReturn = AsyncCursor | RowValue | RowDict | Rows | list[
     RowDict] | None
 
@@ -122,18 +138,7 @@ R_co = TypeVar("R_co", covariant=True)
 
 
 class RunWithPoolWrappedFunc(Protocol[P, R_co]):
-
-    @overload
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Awaitable[R_co]:
-        ...
-
-    @overload
-    def __call__(
-        self,
-        *args: Any,
-        cur: AsyncCursor | None = None,
-        **kwargs: Any,
-    ) -> Awaitable[R_co]:
         ...
 
 
@@ -145,8 +150,9 @@ def run_with_pool(
 ]:
     """
     Decorator to inject a cursor into the function.
-    If 'cur' is passed, it uses it. Otherwise, it acquires a new connection
-    from the pool, creates a cursor, and handles retries on connection loss.
+    It first tries a cursor from with_cursor(...). If unavailable, it acquires
+    a new connection from the pool, creates a cursor, and handles retries on
+    connection loss.
     """
 
     def decorator(
@@ -154,39 +160,40 @@ def run_with_pool(
     ) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
-        async def run(
-            *args: Any,
-            cur: AsyncCursor | None = None,
-            **kwargs: Any,
-        ) -> R:
-            if _connector is None:
-                raise PGConnectorError('Not connected')
+        async def run(*args: P.args, **kwargs: P.kwargs) -> R:
+            current_cur = _current_cursor.get()
 
             try:
-                # If no cursor provided, create a new connection context
-                if cur is None:
-                    pool = _connector.get()
-                    async with pool.connection() as conn:
-                        if row_factory_fn is None:
-                            async with conn.cursor() as c0:
-                                return await f(c0, *args, **kwargs)
-                        async with conn.cursor(
-                                row_factory=row_factory_fn) as c0:
+                if current_cur is not None:
+                    return await f(current_cur, *args, **kwargs)
+
+                connector = _connector
+                if connector is None:
+                    raise PGConnectorError('Not connected')
+
+                # No explicit/current cursor; create a new connection context.
+                pool = connector.get()
+                async with pool.connection() as conn:
+                    if row_factory_fn is None:
+                        async with conn.cursor() as c0:
                             return await f(c0, *args, **kwargs)
-                else:
-                    # Use the provided cursor
-                    return await f(cur, *args, **kwargs)
+                    async with conn.cursor(
+                            row_factory=row_factory_fn) as c0:
+                        return await f(c0, *args, **kwargs)
             except RuntimeError as e:
-                # If cursor was provided externally, propagate the error
-                if cur is not None:
+                # If cursor was provided externally, propagate the error.
+                if current_cur is not None:
                     raise e
 
                 # Retry logic for closed connections
                 if not is_closing_runtime_error(e):
                     raise e
-                connected = await _connector.connect()
+                connector = _connector
+                if connector is None:
+                    raise e
+                connected = await connector.connect()
                 if connected:
-                    return await run(*args, cur=None, **kwargs)
+                    return await run(*args, **kwargs)
                 raise e
 
         return cast(RunWithPoolWrappedFunc[P, R], run)
