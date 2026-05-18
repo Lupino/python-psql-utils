@@ -156,6 +156,7 @@ class RunWithPoolWrappedFunc(Protocol[P, R_co]):
 
 def run_with_pool(
     row_factory_fn: AsyncRowFactory[Any] | None = None,
+    transaction: bool = False,
 ) -> Callable[
     [Callable[P, Awaitable[R]]],
         RunWithPoolWrappedFunc[P, R],
@@ -175,6 +176,12 @@ def run_with_pool(
         async def run(*args: P.args, **kwargs: P.kwargs) -> R:
             has_scoped_cursor = get_cursor() is not None
 
+            async def run_wrapped_in_txn_if_needed(cur: AsyncCursor) -> R:
+                if not transaction:
+                    return await f(*args, **kwargs)
+                async with cur.connection.transaction():
+                    return await f(*args, **kwargs)
+
             try:
                 if get_cursor() is not None:
                     return await f(*args, **kwargs)
@@ -186,14 +193,14 @@ def run_with_pool(
                 # No explicit/current cursor; create a new connection context.
                 pool = connector.get()
                 async with pool.connection() as conn:
-                    if row_factory_fn is None:
-                        async with conn.cursor() as c0:
-                            async with with_cursor(c0):
-                                return await f(*args, **kwargs)
-                    async with conn.cursor(
-                            row_factory=row_factory_fn) as c0:
+                    cursor_cm = (
+                        conn.cursor()
+                        if row_factory_fn is None
+                        else conn.cursor(row_factory=row_factory_fn)
+                    )
+                    async with cursor_cm as c0:
                         async with with_cursor(c0):
-                            return await f(*args, **kwargs)
+                            return await run_wrapped_in_txn_if_needed(c0)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error.
                 if has_scoped_cursor:

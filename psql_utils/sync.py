@@ -149,7 +149,8 @@ class RunWithPoolWrappedFunc(Protocol[P, R_co]):
 
 
 def run_with_pool(
-    row_factory_fn: RowFactory[Any] | None = None
+    row_factory_fn: RowFactory[Any] | None = None,
+    transaction: bool = False,
 ) -> Callable[
     [Callable[P, R]],
         RunWithPoolWrappedFunc[P, R],
@@ -169,6 +170,12 @@ def run_with_pool(
         def run(*args: P.args, **kwargs: P.kwargs) -> R:
             has_scoped_cursor = get_cursor() is not None
 
+            def run_wrapped_in_txn_if_needed(cur: Cursor) -> R:
+                if not transaction:
+                    return f(*args, **kwargs)
+                with cur.connection.transaction():
+                    return f(*args, **kwargs)
+
             try:
                 if get_cursor() is not None:
                     return f(*args, **kwargs)
@@ -180,13 +187,14 @@ def run_with_pool(
                 # No explicit/current cursor; create a new connection context.
                 pool = connector.get()
                 with pool.connection() as conn:
-                    if row_factory_fn is None:
-                        with conn.cursor() as c0:
-                            with with_cursor(c0):
-                                return f(*args, **kwargs)
-                    with conn.cursor(row_factory=row_factory_fn) as c0:
+                    cursor_cm = (
+                        conn.cursor()
+                        if row_factory_fn is None
+                        else conn.cursor(row_factory=row_factory_fn)
+                    )
+                    with cursor_cm as c0:
                         with with_cursor(c0):
-                            return f(*args, **kwargs)
+                            return run_wrapped_in_txn_if_needed(c0)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error
                 if has_scoped_cursor:

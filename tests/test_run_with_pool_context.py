@@ -30,10 +30,24 @@ class _AsyncConn:
     def __init__(self, cur: _AsyncDummyCursor) -> None:
         self.cur = cur
         self.cursor_calls = 0
+        self.transaction_calls = 0
+        self.cur.connection = self
 
     def cursor(self, **kwargs: Any) -> _AsyncCursorCM:
         self.cursor_calls += 1
         return _AsyncCursorCM(self.cur)
+
+    def transaction(self) -> "_AsyncTxCM":
+        self.transaction_calls += 1
+        return _AsyncTxCM()
+
+
+class _AsyncTxCM:
+    async def __aenter__(self) -> "_AsyncTxCM":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
 
 
 class _AsyncConnCM:
@@ -78,10 +92,24 @@ class _SyncConn:
     def __init__(self, cur: _SyncDummyCursor) -> None:
         self.cur = cur
         self.cursor_calls = 0
+        self.transaction_calls = 0
+        self.cur.connection = self
 
     def cursor(self, **kwargs: Any) -> _SyncCursorCM:
         self.cursor_calls += 1
         return _SyncCursorCM(self.cur)
+
+    def transaction(self) -> "_SyncTxCM":
+        self.transaction_calls += 1
+        return _SyncTxCM()
+
+
+class _SyncTxCM:
+    def __enter__(self) -> "_SyncTxCM":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
 
 
 class _SyncConnCM:
@@ -157,6 +185,44 @@ class RunWithPoolAsyncContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ret, 15)
         self.assertEqual(conn.cursor_calls, 1)
 
+    async def test_transaction_true_skips_existing_scoped_cursor(self) -> None:
+        conn = _AsyncConn(_AsyncDummyCursor(10))
+        cur = conn.cur
+
+        @psql_utils.run_with_pool(transaction=True)
+        async def add(x: int) -> int:
+            c = psql_utils.get_cursor()
+            assert c is not None
+            return c.value + x
+
+        async with psql_utils.with_cursor(cur):
+            ret = await add(5)
+
+        self.assertEqual(ret, 15)
+        self.assertEqual(conn.transaction_calls, 0)
+
+    async def test_transaction_true_uses_transaction_for_new_cursor(self) -> None:
+        cur = _AsyncDummyCursor(10)
+        conn = _AsyncConn(cur)
+        connector = _AsyncConnector(_AsyncPool(conn))
+        original_connector = psql_utils._connector
+        psql_utils._connector = connector
+
+        @psql_utils.run_with_pool(transaction=True)
+        async def add(x: int) -> int:
+            c = psql_utils.get_cursor()
+            assert c is not None
+            return c.value + x
+
+        try:
+            ret = await add(5)
+        finally:
+            psql_utils._connector = original_connector
+
+        self.assertEqual(ret, 15)
+        self.assertEqual(conn.cursor_calls, 1)
+        self.assertEqual(conn.transaction_calls, 1)
+
 class RunWithPoolSyncContextTests(unittest.TestCase):
     def test_uses_cursor_from_contextvar_without_connector(self) -> None:
         cur = _SyncDummyCursor(10)
@@ -188,3 +254,41 @@ class RunWithPoolSyncContextTests(unittest.TestCase):
 
         self.assertEqual(ret, 15)
         self.assertEqual(conn.cursor_calls, 1)
+
+    def test_transaction_true_skips_existing_scoped_cursor(self) -> None:
+        conn = _SyncConn(_SyncDummyCursor(10))
+        cur = conn.cur
+
+        @psql_sync.run_with_pool(transaction=True)
+        def add(x: int) -> int:
+            c = psql_sync.get_cursor()
+            assert c is not None
+            return c.value + x
+
+        with psql_sync.with_cursor(cur):
+            ret = add(5)
+
+        self.assertEqual(ret, 15)
+        self.assertEqual(conn.transaction_calls, 0)
+
+    def test_transaction_true_uses_transaction_for_new_cursor(self) -> None:
+        cur = _SyncDummyCursor(10)
+        conn = _SyncConn(cur)
+        connector = _SyncConnector(_SyncPool(conn))
+        original_connector = psql_sync._connector
+        psql_sync._connector = connector
+
+        @psql_sync.run_with_pool(transaction=True)
+        def add(x: int) -> int:
+            c = psql_sync.get_cursor()
+            assert c is not None
+            return c.value + x
+
+        try:
+            ret = add(5)
+        finally:
+            psql_sync._connector = original_connector
+
+        self.assertEqual(ret, 15)
+        self.assertEqual(conn.cursor_calls, 1)
+        self.assertEqual(conn.transaction_calls, 1)
