@@ -1,11 +1,12 @@
 # psql_utils
 
-A lightweight PostgreSQL utility library that provides:
+`psql_utils` is a typed PostgreSQL helper library on top of `psycopg` 3, with both async and sync APIs.
 
-- Async and sync connection-pool wrappers based on `psycopg`
-- Convenient SQL helpers (`insert / update / delete / select / count / sum`)
-- Business-oriented `record` helpers (`get/save/remove/get_list/count`)
-- `CRUD` builders to export module-level `save/get/get_list/count/remove`
+It provides three layers:
+
+- Low-level SQL helpers (`insert`, `update`, `select`, `count`, ...)
+- Record-oriented helpers (`record.get/save/get_list/remove/count`)
+- Reusable CRUD builders (`build_crud`, `build_crud_exports`)
 
 ## Installation
 
@@ -13,23 +14,25 @@ A lightweight PostgreSQL utility library that provides:
 pip install psql_utils
 ```
 
-Install from source:
+From source:
 
 ```bash
 git clone https://github.com/Lupino/python-psql-utils.git
 cd python-psql-utils
-python setup.py install
+pip install .
 ```
 
-## Module Layers
+## Package Layout
 
-- `psql_utils`: async low-level SQL API (`await` required)
-- `psql_utils.sync`: sync low-level SQL API
-- `psql_utils.record`: async business record API
-- `psql_utils.record_sync`: sync business record API
-- `psql_utils.crud`: async CRUD builder
-- `psql_utils.crud_sync`: sync CRUD builder
-- `psql_utils.types`: SQL helper types (`t/c/cs/i`)
+- `psql_utils`: async low-level database API
+- `psql_utils.sync`: sync low-level database API
+- `psql_utils.record`: async record helpers
+- `psql_utils.record_sync`: sync record helpers
+- `psql_utils.crud`: async CRUD wrappers/builders
+- `psql_utils.crud_sync`: sync CRUD wrappers/builders
+- `psql_utils.types`: SQL node helpers (`t/c/cs/i`)
+- `psql_utils.gen`: SQL string generators
+- `psql_utils.errors`: domain exceptions
 
 ## Quick Start (Async)
 
@@ -47,18 +50,19 @@ async def main() -> None:
 
     users = t("users")
 
-    uid = await pg.insert(
+    user_id = await pg.insert(
         users,
         [c("name"), c("email")],
         ("Alice", "alice@example.com"),
         c("id"),
+        required=True,
     )
 
     row = await pg.select_one(
         users,
         [c("id"), c("name"), c("email")],
         part_sql="id=%s",
-        args=(uid,),
+        args=(user_id,),
     )
     print(row)
 
@@ -75,93 +79,74 @@ if __name__ == "__main__":
 import psql_utils.sync as pg
 from psql_utils.types import t, c
 
-pg.connect({
-    "dsn": "postgresql://user:password@127.0.0.1:5432/mydb",
-})
+pg.connect({"dsn": "postgresql://user:password@127.0.0.1:5432/mydb"})
 
 users = t("users")
-
-uid = pg.insert(
+user_id = pg.insert(
     users,
     [c("name"), c("email")],
     ("Bob", "bob@example.com"),
     c("id"),
 )
-
 row = pg.select_one(
     users,
     [c("id"), c("name"), c("email")],
     part_sql="id=%s",
-    args=(uid,),
+    args=(user_id,),
 )
 print(row)
 
 pg.close()
 ```
 
-## Connection Lifecycle
+## Connection Model
 
-Async:
+- `connect(config)` initializes a global singleton connector.
+- Pool is opened with `autocommit=True`.
+- Async side uses `AsyncConnectionPool`; sync side uses `ConnectionPool`.
+- `close()` shuts down the global pool.
+- `on_connected(fn)` registers callbacks executed after each successful `connect()`.
 
-```python
-import psql_utils as pg
+You must call `connect()` before using query helpers.
 
-await pg.connect({"dsn": "postgresql://..."})
-await pg.close()
-```
-
-Sync:
-
-```python
-import psql_utils.sync as pg
-
-pg.connect({"dsn": "postgresql://..."})
-pg.close()
-```
-
-Notes:
-
-- `connect()` uses a global singleton connector.
-- Current default is `autocommit=True`.
-- Initialize the connection before calling query APIs.
-
-## Helper Types
+## SQL Node Helpers
 
 ```python
 from psql_utils.types import t, c, cs, i
 
 users = t("users")
-name_col = c("name")
-cols = cs(["id", "name"])
+u = users.alias("u")
+users_with_org = users.join(t("org"), "org.id = users.org_id")
+
+cols = cs(["id", "name", "email"])
 idx = i("email_idx")
 ```
 
-Common composition:
+## Low-Level APIs
 
-- `t("users").alias("u")`
-- `t("users").join(t("org"), "org.id = users.org_id")`
+Async and sync modules expose the same function names:
 
-## Low-Level SQL API (Async/Sync share names)
+- Schema: `create_table`, `add_table_column`, `create_index`, `drop_table`
+- Write: `insert`, `insert_or_update`, `update`, `delete`
+- Read/Aggregate: `select`, `select_one`, `select_only`, `select_one_only`, `sum`, `count`, `group_count`
 
-Main functions:
+Important behavior:
 
-- `create_table(table_name, columns)`
-- `add_table_column(table_name, columns)`
-- `create_index(uniq, table_name, index_name, columns)`
-- `insert(table_name, columns, args, ret_column=None, ...)`
-- `insert_or_update(table_name, uniq_columns, value_columns=None, ...)`
-- `update(table_name, columns, part_sql="", args=())`
-- `delete(table_name, part_sql="", args=())`
-- `sum(table_name, part_sql="", args=(), column=c("*"), join_sql="")`
-- `count(table_name, part_sql="", args=(), column=c("*"), ...)`
-- `select(table_name, columns, part_sql="", args=(), ...)`
-- `select_one(table_name, columns, part_sql="", args=(), ...)`
-- `select_only(table_name, column, part_sql="", args=(), ...)`
-- `select_one_only(table_name, column, part_sql="", args=(), ...)`
-- `drop_table(table_name)`
-- `group_count(table_name, columns, part_sql="", args=(), ...)`
+- `select` / `select_one` return dict rows (`dict_row` cursor factory).
+- `required=True` on `insert`/`select` raises `QueryResultError` when result constraints are not met.
+- `run_with_pool` allows passing `cur=` manually to reuse an existing cursor/transaction context.
 
-## Record API (Recommended for business logic)
+## Record API
+
+`record` / `record_sync` provide higher-level CRUD-by-data behavior:
+
+- `get`: load one row by `id` or unique keys
+- `save`: upsert-like behavior driven by `id` / `uniq_keys`
+- `get_list`: list query with filter operators
+- `count`: count query using same filter grammar
+- `remove`: delete one row after resolving it
+
+Async example:
 
 ```python
 from psql_utils import record
@@ -169,7 +154,7 @@ from psql_utils.types import t
 
 users = t("users")
 
-uid = await record.save(
+user_id = await record.save(
     users,
     keys=["name", "created_at", "updated_at"],
     uniq_keys=["email"],
@@ -177,11 +162,7 @@ uid = await record.save(
     email="alice@example.com",
 )
 
-row = await record.get(
-    users,
-    uniq_keys=["email"],
-    email="alice@example.com",
-)
+row = await record.get(users, uniq_keys=["email"], email="alice@example.com")
 
 rows = await record.get_list(
     users,
@@ -191,33 +172,25 @@ rows = await record.get_list(
     size=20,
 )
 
-ok = await record.remove(users, uniq_keys=["email"], email="alice@example.com")
+total = await record.count(users, status="active")
+removed = await record.remove(users, uniq_keys=["email"], email="alice@example.com")
 ```
 
-Sync version:
+Sync version has the same signatures without `await`:
 
 ```python
 from psql_utils import record_sync as record
 ```
 
-Same API, without `await`.
+## Filter Operator Suffixes
 
-## Query Condition Syntax (`record.get/get_list/count`)
+Available suffixes for `record.get_list` / `record.count` filters:
 
-Supported operator suffixes:
-
-- `_gt`: `>`
-- `_lt`: `<`
-- `_gte`: `>=`
-- `_lte`: `<=`
-- `_neq`: `!=`
-- `_like`: `LIKE`
-- `_unlike`: `NOT LIKE`
-- `_in`: `IN (...)`
-- `_match`: `~*`
-- `_unmatch`: `!~*`
-- `_similar`: `SIMILAR TO`
-- `_unsimilar`: `NOT SIMILAR TO`
+- `_gt`, `_lt`, `_gte`, `_lte`, `_neq`
+- `_like`, `_unlike`
+- `_in` (list/CSV/subquery)
+- `_match`, `_unmatch`
+- `_similar`, `_unsimilar`
 
 Example:
 
@@ -230,9 +203,9 @@ rows = await record.get_list(
 )
 ```
 
-### JSON Field Querying
+## JSON Field Support
 
-Declare JSON columns with `json_keys`, then use dotted paths:
+Declare JSON columns via `json_keys`, then use dotted paths in fields/sorts/filters.
 
 ```python
 rows = await record.get_list(
@@ -244,58 +217,68 @@ rows = await record.get_list(
 )
 ```
 
-## CRUD Builder
+For `save`, `json_keys` and `sub_json_keys` support JSON merge behavior; `replace_keys` can disable merge on selected keys.
 
-Async:
+## CRUD Builders
+
+Use `build_crud` when you want an object with bound config:
 
 ```python
-from psql_utils.crud import build_crud_exports
+from psql_utils.crud import build_crud
 from psql_utils.types import t
 
-crud, save, get, get_list, count, remove = build_crud_exports(
+crud = build_crud(
     t("users"),
     keys=["name", "created_at", "updated_at"],
     uniq_keys=["email"],
     json_keys=["data"],
     get_kwargs={"required_uniq_keys": False},
 )
+
+user_id = await crud.save(name="Alice", email="alice@example.com")
 ```
 
-Sync:
+Use `build_crud_exports` for module-style exports:
 
 ```python
-from psql_utils.crud_sync import build_crud_exports
+crud, save, get, get_list, count, remove = build_crud_exports(
+    t("users"),
+    keys=["name", "created_at", "updated_at"],
+    uniq_keys=["email"],
+)
 ```
 
-Note:
+Sync variant:
 
-- `build_crud_exports` now returns explicit callable types (not an `Any` tuple).
+```python
+from psql_utils.crud_sync import build_crud, build_crud_exports
+```
 
 ## Hooks
 
-`record.save`:
+- `record.save(..., on_saved=callback)`
+  - callback signature: `on_saved(old_record, id)`
+  - async version accepts coroutine callbacks
+- `record.remove(..., on_removed=callback)`
+  - callback signature: `on_removed(old_record)`
+  - async version accepts coroutine callbacks
 
-- `on_saved(old_record, id)` runs after save succeeds
-- async version accepts coroutine callbacks
+## Exceptions
 
-`record.remove`:
+From `psql_utils.errors`:
 
-- `on_removed(old_record)` runs after delete succeeds
-- async version accepts coroutine callbacks
+- `ValidationError`: invalid caller input/query shape
+- `QueryResultError`: required result not satisfied
+- `RecordNotFoundError`: update target not found
+- `UniqueConflictError`: unique key conflict during save
 
-## SQL Fragment Safety Rules
+`PGConnectorError` is raised by async/sync connector modules when database is not connected.
 
-The library allows raw SQL fragments in advanced parameters:
+## SQL Fragment Safety
 
-- `part_sql`
-- `join_sql`
-- `groups`
-- `sorts`
-- `lock_sql`
-- `*_in="select ..."` subquery filters
+Raw SQL fragment params are validated (for example: `part_sql`, `join_sql`, `groups`, `sorts`, `lock_sql`).
 
-To reduce accidental injection risks, these fragments are validated.
-`ValueError` is raised when a fragment contains:
+`ValueError` is raised if a fragment contains:
 
 - `;`
 - `--`
@@ -303,18 +286,21 @@ To reduce accidental injection risks, these fragments are validated.
 - `*/`
 - `\x00`
 
-For `*_in` subquery strings, the value must also start with `SELECT`.
+For `_in` subquery strings, value must start with `SELECT`.
 
-Important:
+Guideline: keep user input in bound parameters, not in raw fragments.
 
-- Regular conditions still use parameter binding (`%s`).
-- Raw SQL fragments must come from trusted server-side code.
-- Never pass user input directly into raw SQL fragments.
+## Development
 
-## Tests
+Run tests:
 
 ```bash
 python -m unittest discover -s tests -p 'test_*.py'
+```
+
+Type check:
+
+```bash
 python -m mypy psql_utils
 ```
 
