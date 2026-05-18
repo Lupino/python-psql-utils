@@ -1,28 +1,15 @@
 from typing import Any, Callable, Dict, List, Optional
 
 from . import record_sync
+from ._crud_base import (
+    CrudConfigMixin,
+    build_crud_exports_tuple,
+    build_crud_instance,
+)
 from .types import TableName
 
 
-class CRUD:
-    def __init__(
-        self,
-        table: TableName,
-        *,
-        keys: Optional[List[str]] = None,
-        uniq_keys: Optional[List[str]] = None,
-        json_keys: Optional[List[str]] = None,
-        save_kwargs: Optional[Dict[str, Any]] = None,
-        get_kwargs: Optional[Dict[str, Any]] = None,
-        query_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        self.table = table
-        self.keys = keys or []
-        self.uniq_keys = uniq_keys or []
-        self.json_keys = json_keys or []
-        self.save_kwargs = save_kwargs or {}
-        self.get_kwargs = get_kwargs or {}
-        self.query_kwargs = query_kwargs or {}
+class CRUD(CrudConfigMixin):
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         return record_sync.save(
@@ -89,7 +76,8 @@ def build_crud(
     query_kwargs: Optional[Dict[str, Any]] = None,
 ) -> CRUD:
     """Build a CRUD helper object for db modules."""
-    return CRUD(
+    return build_crud_instance(
+        CRUD,
         table,
         keys=keys,
         uniq_keys=uniq_keys,
@@ -120,4 +108,4 @@ def build_crud_exports(
         get_kwargs=get_kwargs,
         query_kwargs=query_kwargs,
     )
-    return crud, crud.save, crud.get, crud.get_list, crud.count, crud.remove
+    return build_crud_exports_tuple(crud)

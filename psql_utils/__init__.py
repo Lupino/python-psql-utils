@@ -9,6 +9,7 @@ from .types import TableName, Column, IndexName, c
 from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
+from ._row_utils import get_only_default_from_row
 
 
 class PGConnectorError(Exception):
@@ -257,12 +258,7 @@ async def get_only_default(
 ) -> Any:
     """Fetches a single value or returns a default."""
     ret = await cur.fetchone()
-    if ret is None:
-        return default
-    ret_any: Any = ret
-    if key and isinstance(ret_any, dict):
-        return ret_any.get(key, default)
-    return ret[0]
+    return get_only_default_from_row(ret, default, key)
 
 
 @run_with_pool()

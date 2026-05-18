@@ -46,6 +46,22 @@ class _AsyncCursor:
         return self._rows[0] if self._rows else None
 
 
+class _SyncSingleRowCursor:
+    def __init__(self, row: Any) -> None:
+        self._row = row
+
+    def fetchone(self) -> Any:
+        return self._row
+
+
+class _AsyncSingleRowCursor:
+    def __init__(self, row: Any) -> None:
+        self._row = row
+
+    async def fetchone(self) -> Any:
+        return self._row
+
+
 class FixedExecuteSyncTests(unittest.TestCase):
     def test_fetch_all_as_dict_from_tuple_rows(self) -> None:
         cur = _SyncCursor(
@@ -70,6 +86,26 @@ class FixedExecuteSyncTests(unittest.TestCase):
         cur = _SyncCursor()
         with self.assertRaises(ValueError):
             psql_sync.fixed_execute(cur, "select 1", fetch="many")
+
+    def test_get_only_default_returns_scalar_or_default(self) -> None:
+        self.assertEqual(
+            psql_sync.get_only_default(_SyncSingleRowCursor((7,)), 0),
+            7,
+        )
+        self.assertEqual(
+            psql_sync.get_only_default(_SyncSingleRowCursor(None), 9),
+            9,
+        )
+
+    def test_get_only_default_dict_with_key(self) -> None:
+        self.assertEqual(
+            psql_sync.get_only_default(_SyncSingleRowCursor({"n": 3}), 0, "n"),
+            3,
+        )
+        self.assertEqual(
+            psql_sync.get_only_default(_SyncSingleRowCursor({"x": 1}), 0, "n"),
+            0,
+        )
 
 
 class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -96,3 +132,31 @@ class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
         cur = _AsyncCursor()
         with self.assertRaises(ValueError):
             await psql_utils.fixed_execute(cur, "select 1", fetch="many")
+
+    async def test_get_only_default_returns_scalar_or_default(self) -> None:
+        self.assertEqual(
+            await psql_utils.get_only_default(_AsyncSingleRowCursor((7,)), 0),
+            7,
+        )
+        self.assertEqual(
+            await psql_utils.get_only_default(_AsyncSingleRowCursor(None), 9),
+            9,
+        )
+
+    async def test_get_only_default_dict_with_key(self) -> None:
+        self.assertEqual(
+            await psql_utils.get_only_default(
+                _AsyncSingleRowCursor({"n": 3}),
+                0,
+                "n",
+            ),
+            3,
+        )
+        self.assertEqual(
+            await psql_utils.get_only_default(
+                _AsyncSingleRowCursor({"x": 1}),
+                0,
+                "n",
+            ),
+            0,
+        )
