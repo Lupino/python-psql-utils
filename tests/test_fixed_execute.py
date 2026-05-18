@@ -68,44 +68,38 @@ class FixedExecuteSyncTests(unittest.TestCase):
             rows=[(1, "alice"), (2, "bob")],
             description=[SimpleNamespace(name="id"), SimpleNamespace(name="name")],
         )
-        ret = psql_sync.fixed_execute(
-            cur,
-            "select id, name from users",
-            fetch="all",
-            as_dict=True,
-        )
+        with psql_sync.with_cursor(cur):
+            ret = psql_sync.fixed_execute(
+                "select id, name from users",
+                fetch="all",
+                as_dict=True,
+            )
         self.assertEqual(ret, [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}])
 
     def test_non_sized_truthy_args_are_forwarded(self) -> None:
         cur = _SyncCursor()
         args = (x for x in [1])
-        psql_sync.fixed_execute(cur, "select %s", args=args)
+        with psql_sync.with_cursor(cur):
+            psql_sync.fixed_execute("select %s", args=args)
         self.assertEqual(cur.executed, [("select %s", args)])
 
     def test_invalid_fetch_mode_raises(self) -> None:
         cur = _SyncCursor()
-        with self.assertRaises(ValueError):
-            psql_sync.fixed_execute(cur, "select 1", fetch="many")
+        with psql_sync.with_cursor(cur):
+            with self.assertRaises(ValueError):
+                psql_sync.fixed_execute("select 1", fetch="many")
 
     def test_get_only_default_returns_scalar_or_default(self) -> None:
-        self.assertEqual(
-            psql_sync.get_only_default(_SyncSingleRowCursor((7,)), 0),
-            7,
-        )
-        self.assertEqual(
-            psql_sync.get_only_default(_SyncSingleRowCursor(None), 9),
-            9,
-        )
+        with psql_sync.with_cursor(_SyncSingleRowCursor((7,))):
+            self.assertEqual(psql_sync.get_only_default(0), 7)
+        with psql_sync.with_cursor(_SyncSingleRowCursor(None)):
+            self.assertEqual(psql_sync.get_only_default(9), 9)
 
     def test_get_only_default_dict_with_key(self) -> None:
-        self.assertEqual(
-            psql_sync.get_only_default(_SyncSingleRowCursor({"n": 3}), 0, "n"),
-            3,
-        )
-        self.assertEqual(
-            psql_sync.get_only_default(_SyncSingleRowCursor({"x": 1}), 0, "n"),
-            0,
-        )
+        with psql_sync.with_cursor(_SyncSingleRowCursor({"n": 3})):
+            self.assertEqual(psql_sync.get_only_default(0, "n"), 3)
+        with psql_sync.with_cursor(_SyncSingleRowCursor({"x": 1})):
+            self.assertEqual(psql_sync.get_only_default(0, "n"), 0)
 
 
 class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -114,49 +108,35 @@ class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
             rows=[(1, "alice"), (2, "bob")],
             description=[SimpleNamespace(name="id"), SimpleNamespace(name="name")],
         )
-        ret = await psql_utils.fixed_execute(
-            cur,
-            "select id, name from users",
-            fetch="all",
-            as_dict=True,
-        )
+        async with psql_utils.with_cursor(cur):
+            ret = await psql_utils.fixed_execute(
+                "select id, name from users",
+                fetch="all",
+                as_dict=True,
+            )
         self.assertEqual(ret, [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}])
 
     async def test_non_sized_truthy_args_are_forwarded(self) -> None:
         cur = _AsyncCursor()
         args = (x for x in [1])
-        await psql_utils.fixed_execute(cur, "select %s", args=args)
+        async with psql_utils.with_cursor(cur):
+            await psql_utils.fixed_execute("select %s", args=args)
         self.assertEqual(cur.executed, [("select %s", args)])
 
     async def test_invalid_fetch_mode_raises(self) -> None:
         cur = _AsyncCursor()
-        with self.assertRaises(ValueError):
-            await psql_utils.fixed_execute(cur, "select 1", fetch="many")
+        async with psql_utils.with_cursor(cur):
+            with self.assertRaises(ValueError):
+                await psql_utils.fixed_execute("select 1", fetch="many")
 
     async def test_get_only_default_returns_scalar_or_default(self) -> None:
-        self.assertEqual(
-            await psql_utils.get_only_default(_AsyncSingleRowCursor((7,)), 0),
-            7,
-        )
-        self.assertEqual(
-            await psql_utils.get_only_default(_AsyncSingleRowCursor(None), 9),
-            9,
-        )
+        async with psql_utils.with_cursor(_AsyncSingleRowCursor((7,))):
+            self.assertEqual(await psql_utils.get_only_default(0), 7)
+        async with psql_utils.with_cursor(_AsyncSingleRowCursor(None)):
+            self.assertEqual(await psql_utils.get_only_default(9), 9)
 
     async def test_get_only_default_dict_with_key(self) -> None:
-        self.assertEqual(
-            await psql_utils.get_only_default(
-                _AsyncSingleRowCursor({"n": 3}),
-                0,
-                "n",
-            ),
-            3,
-        )
-        self.assertEqual(
-            await psql_utils.get_only_default(
-                _AsyncSingleRowCursor({"x": 1}),
-                0,
-                "n",
-            ),
-            0,
-        )
+        async with psql_utils.with_cursor(_AsyncSingleRowCursor({"n": 3})):
+            self.assertEqual(await psql_utils.get_only_default(0, "n"), 3)
+        async with psql_utils.with_cursor(_AsyncSingleRowCursor({"x": 1})):
+            self.assertEqual(await psql_utils.get_only_default(0, "n"), 0)

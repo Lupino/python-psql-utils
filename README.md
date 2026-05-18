@@ -141,6 +141,10 @@ Important behavior:
 When you already have a cursor in an upper layer (for example inside a
 transaction), propagate it downward with `with_cursor(...)`. Any nested
 `@run_with_pool` function will reuse that cursor.
+`run_with_pool` also propagates its internally acquired cursor to nested
+`@run_with_pool` calls in the same execution chain.
+Inside `@run_with_pool` functions, use `get_cursor()` / `sync.get_cursor()`
+to access the current cursor when needed.
 
 Async:
 

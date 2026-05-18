@@ -24,7 +24,6 @@ from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
 from ._typing import (
-    Concatenate,
     Description,
     P,
     R,
@@ -131,6 +130,19 @@ async def with_cursor(cur: AsyncCursor) -> AsyncIterator[AsyncCursor]:
         _current_cursor.reset(token)
 
 
+def get_cursor() -> AsyncCursor | None:
+    """Returns the scoped cursor set by with_cursor(), if any."""
+    return _current_cursor.get()
+
+
+def _get_cursor_or_raise() -> AsyncCursor:
+    """Returns the current scoped cursor or raises when unavailable."""
+    cur = get_cursor()
+    if cur is None:
+        raise PGConnectorError('No active cursor in context')
+    return cur
+
+
 FixedExecuteReturn = AsyncCursor | RowValue | RowDict | Rows | list[
     RowDict] | None
 
@@ -145,7 +157,7 @@ class RunWithPoolWrappedFunc(Protocol[P, R_co]):
 def run_with_pool(
     row_factory_fn: AsyncRowFactory[Any] | None = None,
 ) -> Callable[
-    [Callable[Concatenate[AsyncCursor, P], Awaitable[R]]],
+    [Callable[P, Awaitable[R]]],
         RunWithPoolWrappedFunc[P, R],
 ]:
     """
@@ -156,16 +168,16 @@ def run_with_pool(
     """
 
     def decorator(
-        f: Callable[Concatenate[AsyncCursor, P], Awaitable[R]],
+        f: Callable[P, Awaitable[R]],
     ) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
         async def run(*args: P.args, **kwargs: P.kwargs) -> R:
-            current_cur = _current_cursor.get()
+            has_scoped_cursor = get_cursor() is not None
 
             try:
-                if current_cur is not None:
-                    return await f(current_cur, *args, **kwargs)
+                if get_cursor() is not None:
+                    return await f(*args, **kwargs)
 
                 connector = _connector
                 if connector is None:
@@ -176,13 +188,15 @@ def run_with_pool(
                 async with pool.connection() as conn:
                     if row_factory_fn is None:
                         async with conn.cursor() as c0:
-                            return await f(c0, *args, **kwargs)
+                            async with with_cursor(c0):
+                                return await f(*args, **kwargs)
                     async with conn.cursor(
                             row_factory=row_factory_fn) as c0:
-                        return await f(c0, *args, **kwargs)
+                        async with with_cursor(c0):
+                            return await f(*args, **kwargs)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error.
-                if current_cur is not None:
+                if has_scoped_cursor:
                     raise e
 
                 # Retry logic for closed connections
@@ -203,7 +217,6 @@ def run_with_pool(
 
 @overload
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal[''] = '',
@@ -214,7 +227,6 @@ async def fixed_execute(
 
 @overload
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
@@ -225,7 +237,6 @@ async def fixed_execute(
 
 @overload
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
@@ -236,7 +247,6 @@ async def fixed_execute(
 
 @overload
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
@@ -247,7 +257,6 @@ async def fixed_execute(
 
 @overload
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
@@ -257,13 +266,13 @@ async def fixed_execute(
 
 
 async def fixed_execute(
-    cur: AsyncCursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['', 'one', 'all'] = '',
     as_dict: bool = False,
 ) -> FixedExecuteReturn:
     """Execute SQL; optionally fetch one/all rows and map rows to dict."""
+    cur = _get_cursor_or_raise()
     if has_sql_args(args):
         await cur.execute(sql, args)
     else:
@@ -287,27 +296,24 @@ async def fixed_execute(
 
 @run_with_pool()
 async def create_table(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
 ) -> None:
     """Executes a CREATE TABLE statement."""
-    await fixed_execute(cur, gen.gen_create_table(table_name, columns))
+    await fixed_execute(gen.gen_create_table(table_name, columns))
 
 
 @run_with_pool()
 async def add_table_column(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
 ) -> None:
     """Executes an ALTER TABLE ADD COLUMN statement."""
-    await fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
+    await fixed_execute(gen.gen_add_table_column(table_name, columns))
 
 
 @run_with_pool()
 async def create_index(
-    cur: AsyncCursor,
     uniq: bool,
     table_name: TableName,
     index_name: IndexName,
@@ -315,22 +321,21 @@ async def create_index(
 ) -> None:
     """Executes a CREATE INDEX statement."""
     sql = gen.gen_create_index(uniq, table_name, index_name, columns)
-    await fixed_execute(cur, sql)
+    await fixed_execute(sql)
 
 
 async def get_only_default(
-    cur: AsyncCursor,
     default: object,
     key: Optional[str] = None,
 ) -> object:
     """Fetches a single value or returns a default."""
+    cur = _get_cursor_or_raise()
     ret = await cur.fetchone()
     return get_only_default_from_row(ret, default, key)
 
 
 @run_with_pool()
 async def insert(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
     args: SQLArgs,
@@ -345,10 +350,10 @@ async def insert(
         columns=columns,
         ret_column=ret_column,
     )
-    await fixed_execute(cur, sql, args)
+    await fixed_execute(sql, args)
 
     if ret_column:
-        ret = await get_only_default(cur, ret_def)
+        ret = await get_only_default(ret_def)
         if required and ret is None:
             raise QueryResultError(err_msg)
         return ret
@@ -357,7 +362,6 @@ async def insert(
 
 @run_with_pool()
 async def insert_or_update(
-        cur: AsyncCursor,
         table_name: TableName,
         uniq_columns: list[Column],
         value_columns: Optional[list[Column]] = None,
@@ -371,12 +375,11 @@ async def insert_or_update(
         value_columns=value_columns,
         other_columns=other_columns,
     )
-    await fixed_execute(cur, sql, args)
+    await fixed_execute(sql, args)
 
 
 @run_with_pool()
 async def update(
-        cur: AsyncCursor,
         table_name: TableName,
         columns: list[Column],
         part_sql: str = '',
@@ -388,24 +391,22 @@ async def update(
         columns=columns,
         part_sql=part_sql,
     )
-    await fixed_execute(cur, sql, args)
+    await fixed_execute(sql, args)
 
 
 @run_with_pool()
 async def delete(
-        cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
         args: SQLArgs = (),
 ) -> None:
     """Executes a DELETE statement."""
     sql = gen.gen_delete(table_name=table_name, part_sql=part_sql)
-    await fixed_execute(cur, sql, args)
+    await fixed_execute(sql, args)
 
 
 @run_with_pool()
 async def sum(
-        cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
         args: SQLArgs = (),
@@ -419,13 +420,12 @@ async def sum(
         column=column,
         join_sql=join_sql,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    await fixed_execute(sql, args)
+    return await get_only_default(0)
 
 
 @run_with_pool()
 async def count(
-    cur: AsyncCursor,
     table_name: TableName,
     part_sql: str = '',
     args: SQLArgs = (),
@@ -441,13 +441,12 @@ async def count(
         join_sql=join_sql,
         groups=groups,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    await fixed_execute(sql, args)
+    return await get_only_default(0)
 
 
 @run_with_pool(row_factory_fn=dict_row)
 async def select(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -475,7 +474,7 @@ async def select(
     )
     rows = cast(
         list[RowDict],
-        await fixed_execute(cur, sql, args, fetch='all', as_dict=True),
+        await fixed_execute(sql, args, fetch='all', as_dict=True),
     )
     if required and not rows:
         raise QueryResultError(err_msg)
@@ -515,7 +514,6 @@ async def select_only(
 
 @run_with_pool(row_factory_fn=dict_row)
 async def select_one(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -533,7 +531,7 @@ async def select_one(
     )
     return cast(
         Optional[RowDict],
-        await fixed_execute(cur, sql, args, fetch='one', as_dict=True),
+        await fixed_execute(sql, args, fetch='one', as_dict=True),
     )
 
 
@@ -563,15 +561,14 @@ async def select_one_only(
 
 
 @run_with_pool()
-async def drop_table(cur: AsyncCursor, table_name: TableName) -> None:
+async def drop_table(table_name: TableName) -> None:
     """Executes a DROP TABLE statement."""
     sql = gen.gen_drop_table(table_name)
-    await fixed_execute(cur, sql)
+    await fixed_execute(sql)
 
 
 @run_with_pool()
 async def group_count(
-    cur: AsyncCursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -587,5 +584,5 @@ async def group_count(
         groups=groups,
         sorts=sorts,
     )
-    await fixed_execute(cur, sql, args)
-    return await get_only_default(cur, 0)
+    await fixed_execute(sql, args)
+    return await get_only_default(0)

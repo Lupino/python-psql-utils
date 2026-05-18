@@ -23,7 +23,6 @@ from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
 from ._typing import (
-    Concatenate,
     Description,
     P,
     R,
@@ -128,6 +127,19 @@ def with_cursor(cur: Cursor) -> Iterator[Cursor]:
         _current_cursor.reset(token)
 
 
+def get_cursor() -> Cursor | None:
+    """Returns the scoped cursor set by with_cursor(), if any."""
+    return _current_cursor.get()
+
+
+def _get_cursor_or_raise() -> Cursor:
+    """Returns the current scoped cursor or raises when unavailable."""
+    cur = get_cursor()
+    if cur is None:
+        raise PGConnectorError('No active cursor in context')
+    return cur
+
+
 R_co = TypeVar("R_co", covariant=True)
 
 
@@ -139,7 +151,7 @@ class RunWithPoolWrappedFunc(Protocol[P, R_co]):
 def run_with_pool(
     row_factory_fn: RowFactory[Any] | None = None
 ) -> Callable[
-    [Callable[Concatenate[Cursor, P], R]],
+    [Callable[P, R]],
         RunWithPoolWrappedFunc[P, R],
 ]:
     """
@@ -150,16 +162,16 @@ def run_with_pool(
     """
 
     def decorator(
-        f: Callable[Concatenate[Cursor, P], R],
+        f: Callable[P, R],
     ) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
         def run(*args: P.args, **kwargs: P.kwargs) -> R:
-            current_cur = _current_cursor.get()
+            has_scoped_cursor = get_cursor() is not None
 
             try:
-                if current_cur is not None:
-                    return f(current_cur, *args, **kwargs)
+                if get_cursor() is not None:
+                    return f(*args, **kwargs)
 
                 connector = _connector
                 if connector is None:
@@ -170,12 +182,14 @@ def run_with_pool(
                 with pool.connection() as conn:
                     if row_factory_fn is None:
                         with conn.cursor() as c0:
-                            return f(c0, *args, **kwargs)
+                            with with_cursor(c0):
+                                return f(*args, **kwargs)
                     with conn.cursor(row_factory=row_factory_fn) as c0:
-                        return f(c0, *args, **kwargs)
+                        with with_cursor(c0):
+                            return f(*args, **kwargs)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error
-                if current_cur is not None:
+                if has_scoped_cursor:
                     raise e
 
                 # Retry logic for closed connections
@@ -196,7 +210,6 @@ def run_with_pool(
 
 @overload
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal[''] = '',
@@ -207,7 +220,6 @@ def fixed_execute(
 
 @overload
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
@@ -218,7 +230,6 @@ def fixed_execute(
 
 @overload
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
@@ -229,7 +240,6 @@ def fixed_execute(
 
 @overload
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
@@ -240,7 +250,6 @@ def fixed_execute(
 
 @overload
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
@@ -250,13 +259,13 @@ def fixed_execute(
 
 
 def fixed_execute(
-    cur: Cursor,
     sql: str,
     args: SQLArgs | None = None,
     fetch: Literal['', 'one', 'all'] = '',
     as_dict: bool = False,
 ) -> Cursor | RowValue | RowDict | Rows | list[RowDict] | None:
     """Execute SQL; optionally fetch one/all rows and map rows to dict."""
+    cur = _get_cursor_or_raise()
     if has_sql_args(args):
         cur.execute(sql, args)
     else:
@@ -280,27 +289,24 @@ def fixed_execute(
 
 @run_with_pool()
 def create_table(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
 ) -> None:
     """Executes a CREATE TABLE statement."""
-    fixed_execute(cur, gen.gen_create_table(table_name, columns))
+    fixed_execute(gen.gen_create_table(table_name, columns))
 
 
 @run_with_pool()
 def add_table_column(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
 ) -> None:
     """Executes an ALTER TABLE ADD COLUMN statement."""
-    fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
+    fixed_execute(gen.gen_add_table_column(table_name, columns))
 
 
 @run_with_pool()
 def create_index(
-    cur: Cursor,
     uniq: bool,
     table_name: TableName,
     index_name: IndexName,
@@ -308,22 +314,21 @@ def create_index(
 ) -> None:
     """Executes a CREATE INDEX statement."""
     sql = gen.gen_create_index(uniq, table_name, index_name, columns)
-    fixed_execute(cur, sql)
+    fixed_execute(sql)
 
 
 def get_only_default(
-    cur: Cursor,
     default: object,
     key: Optional[str] = None,
 ) -> object:
     """Fetches a single value or returns a default."""
+    cur = _get_cursor_or_raise()
     ret = cur.fetchone()
     return get_only_default_from_row(ret, default, key)
 
 
 @run_with_pool()
 def insert(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
     args: SQLArgs,
@@ -338,10 +343,10 @@ def insert(
         columns=columns,
         ret_column=ret_column,
     )
-    fixed_execute(cur, sql, args)
+    fixed_execute(sql, args)
 
     if ret_column:
-        ret = get_only_default(cur, ret_def)
+        ret = get_only_default(ret_def)
         if required and ret is None:
             raise QueryResultError(err_msg)
         return ret
@@ -350,7 +355,6 @@ def insert(
 
 @run_with_pool()
 def insert_or_update(
-        cur: Cursor,
         table_name: TableName,
         uniq_columns: list[Column],
         value_columns: Optional[list[Column]] = None,
@@ -364,12 +368,11 @@ def insert_or_update(
         value_columns=value_columns,
         other_columns=other_columns,
     )
-    fixed_execute(cur, sql, args)
+    fixed_execute(sql, args)
 
 
 @run_with_pool()
 def update(
-        cur: Cursor,
         table_name: TableName,
         columns: list[Column],
         part_sql: str = '',
@@ -381,24 +384,22 @@ def update(
         columns=columns,
         part_sql=part_sql,
     )
-    fixed_execute(cur, sql, args)
+    fixed_execute(sql, args)
 
 
 @run_with_pool()
 def delete(
-        cur: Cursor,
         table_name: TableName,
         part_sql: str = '',
         args: SQLArgs = (),
 ) -> None:
     """Executes a DELETE statement."""
     sql = gen.gen_delete(table_name=table_name, part_sql=part_sql)
-    fixed_execute(cur, sql, args)
+    fixed_execute(sql, args)
 
 
 @run_with_pool()
 def sum(
-        cur: Cursor,
         table_name: TableName,
         part_sql: str = '',
         args: SQLArgs = (),
@@ -412,13 +413,12 @@ def sum(
         column=column,
         join_sql=join_sql,
     )
-    fixed_execute(cur, sql, args)
-    return get_only_default(cur, 0)
+    fixed_execute(sql, args)
+    return get_only_default(0)
 
 
 @run_with_pool()
 def count(
-    cur: Cursor,
     table_name: TableName,
     part_sql: str = '',
     args: SQLArgs = (),
@@ -434,13 +434,12 @@ def count(
         join_sql=join_sql,
         groups=groups,
     )
-    fixed_execute(cur, sql, args)
-    return get_only_default(cur, 0)
+    fixed_execute(sql, args)
+    return get_only_default(0)
 
 
 @run_with_pool(row_factory_fn=dict_row)
 def select(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -468,7 +467,7 @@ def select(
     )
     rows = cast(
         list[RowDict],
-        fixed_execute(cur, sql, args, fetch='all', as_dict=True),
+        fixed_execute(sql, args, fetch='all', as_dict=True),
     )
     if required and not rows:
         raise QueryResultError(err_msg)
@@ -508,7 +507,6 @@ def select_only(
 
 @run_with_pool(row_factory_fn=dict_row)
 def select_one(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -526,7 +524,7 @@ def select_one(
     )
     return cast(
         Optional[RowDict],
-        fixed_execute(cur, sql, args, fetch='one', as_dict=True),
+        fixed_execute(sql, args, fetch='one', as_dict=True),
     )
 
 
@@ -556,15 +554,14 @@ def select_one_only(
 
 
 @run_with_pool()
-def drop_table(cur: Cursor, table_name: TableName) -> None:
+def drop_table(table_name: TableName) -> None:
     """Executes a DROP TABLE statement."""
     sql = gen.gen_drop_table(table_name)
-    fixed_execute(cur, sql)
+    fixed_execute(sql)
 
 
 @run_with_pool()
 def group_count(
-    cur: Cursor,
     table_name: TableName,
     columns: list[Column],
     part_sql: str = '',
@@ -580,5 +577,5 @@ def group_count(
         groups=groups,
         sorts=sorts,
     )
-    fixed_execute(cur, sql, args)
-    return get_only_default(cur, 0)
+    fixed_execute(sql, args)
+    return get_only_default(0)
