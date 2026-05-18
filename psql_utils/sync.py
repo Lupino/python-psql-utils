@@ -444,13 +444,10 @@ def select(
     sorts: Optional[str] = None,
     join_sql: str = '',
     lock_sql: str = '',
-    one: bool = False,
     required: bool = False,
     err_msg: str = 'select result is empty',
-) -> list[RowDict] | RowDict | None:
+) -> list[RowDict]:
     """Executes a SELECT query and returns a list of dictionaries."""
-    if one and size is None:
-        size = 1
     sql = gen.gen_select(
         table_name=table_name,
         columns=columns,
@@ -466,11 +463,6 @@ def select(
         list[RowDict],
         fixed_execute(cur, sql, args, fetch='all', as_dict=True),
     )
-    if one:
-        first = rows[0] if rows else None
-        if required and not first:
-            raise QueryResultError(err_msg)
-        return first
     if required and not rows:
         raise QueryResultError(err_msg)
     return rows
