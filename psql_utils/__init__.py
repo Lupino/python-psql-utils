@@ -373,9 +373,10 @@ async def select(
         join_sql=join_sql,
         lock_sql=lock_sql,
     )
-    await fixed_execute(cur, sql, args)
-    ret = await cur.fetchall()
-    rows = [dict(x) for x in ret]
+    rows = cast(
+        List[Dict[str, Any]],
+        await fixed_execute(cur, sql, args, fetch='all', as_dict=True),
+    )
     if one:
         first = rows[0] if rows else None
         if required and not first:
