@@ -5,6 +5,8 @@ from typing import (
     Awaitable,
     Callable,
     Literal,
+    Protocol,
+    TypeVar,
     overload,
     cast,
 )
@@ -12,14 +14,23 @@ from collections.abc import Mapping
 
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
-from psycopg.rows import dict_row
+from psycopg.rows import AsyncRowFactory, dict_row
 
 from .types import TableName, Column, IndexName, c
 from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
-from ._typing import Description, RowDict, RowValue, Rows, SQLArgs
+from ._typing import (
+    Concatenate,
+    Description,
+    P,
+    R,
+    RowDict,
+    RowValue,
+    Rows,
+    SQLArgs,
+)
 from .errors import QueryResultError
 
 
@@ -104,28 +115,50 @@ async def close() -> None:
     await pool.close()
 
 
-RunWithPoolFunc = Callable[..., Awaitable[object]]
 FixedExecuteReturn = AsyncCursor | RowValue | RowDict | Rows | list[
     RowDict] | None
 
+R_co = TypeVar("R_co", covariant=True)
+
+
+class RunWithPoolWrappedFunc(Protocol[P, R_co]):
+
+    @overload
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Awaitable[R_co]:
+        ...
+
+    @overload
+    def __call__(
+        self,
+        *args: Any,
+        cur: AsyncCursor | None = None,
+        **kwargs: Any,
+    ) -> Awaitable[R_co]:
+        ...
+
 
 def run_with_pool(
-    row_factory: Any = None,
-) -> Callable[[RunWithPoolFunc], RunWithPoolFunc]:
+    row_factory_fn: AsyncRowFactory[Any] | None = None,
+) -> Callable[
+    [Callable[Concatenate[AsyncCursor, P], Awaitable[R]]],
+        RunWithPoolWrappedFunc[P, R],
+]:
     """
     Decorator to inject a cursor into the function.
     If 'cur' is passed, it uses it. Otherwise, it acquires a new connection
     from the pool, creates a cursor, and handles retries on connection loss.
     """
 
-    def decorator(f: RunWithPoolFunc) -> RunWithPoolFunc:
+    def decorator(
+        f: Callable[Concatenate[AsyncCursor, P], Awaitable[R]],
+    ) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
         async def run(
             *args: Any,
-            cur: Any = None,
+            cur: AsyncCursor | None = None,
             **kwargs: Any,
-        ) -> object:
+        ) -> R:
             if _connector is None:
                 raise PGConnectorError('Not connected')
 
@@ -134,14 +167,18 @@ def run_with_pool(
                 if cur is None:
                     pool = _connector.get()
                     async with pool.connection() as conn:
-                        async with conn.cursor(row_factory=row_factory) as c0:
+                        if row_factory_fn is None:
+                            async with conn.cursor() as c0:
+                                return await f(c0, *args, **kwargs)
+                        async with conn.cursor(
+                                row_factory=row_factory_fn) as c0:
                             return await f(c0, *args, **kwargs)
                 else:
                     # Use the provided cursor
                     return await f(cur, *args, **kwargs)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error
-                if cur:
+                if cur is not None:
                     raise e
 
                 # Retry logic for closed connections
@@ -152,7 +189,7 @@ def run_with_pool(
                     return await run(*args, cur=None, **kwargs)
                 raise e
 
-        return run
+        return cast(RunWithPoolWrappedFunc[P, R], run)
 
     return decorator
 
@@ -401,7 +438,7 @@ async def count(
     return await get_only_default(cur, 0)
 
 
-@run_with_pool(row_factory=dict_row)
+@run_with_pool(row_factory_fn=dict_row)
 async def select(
     cur: AsyncCursor,
     table_name: TableName,
@@ -462,8 +499,6 @@ async def select_only(
     ret = cast(
         list[RowDict],
         await select(
-            # Passed as None to trigger pool acquisition in decorator.
-            cur=None,
             table_name=table_name,
             columns=[column],
             part_sql=part_sql,
@@ -479,7 +514,7 @@ async def select_only(
     return [list(x.values())[0] for x in ret]
 
 
-@run_with_pool(row_factory=dict_row)
+@run_with_pool(row_factory_fn=dict_row)
 async def select_one(
     cur: AsyncCursor,
     table_name: TableName,
@@ -515,7 +550,6 @@ async def select_one_only(
     ret = cast(
         Optional[RowDict],
         await select_one(
-            cur=None,
             table_name=table_name,
             columns=[column],
             part_sql=part_sql,

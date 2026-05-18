@@ -1,17 +1,35 @@
 from functools import wraps
 from collections.abc import Mapping
-from typing import Any, Callable, Optional, Literal, overload, cast
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Literal,
+    Protocol,
+    TypeVar,
+    overload,
+    cast,
+)
 
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
-from psycopg.rows import dict_row
+from psycopg.rows import RowFactory, dict_row
 
 from .types import TableName, Column, IndexName, c
 from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
-from ._typing import Description, RowDict, RowValue, Rows, SQLArgs
+from ._typing import (
+    Concatenate,
+    Description,
+    P,
+    R,
+    RowDict,
+    RowValue,
+    Rows,
+    SQLArgs,
+)
 from .errors import QueryResultError
 
 
@@ -94,23 +112,47 @@ def close() -> None:
     pool.close()
 
 
+R_co = TypeVar("R_co", covariant=True)
+
+
+class RunWithPoolWrappedFunc(Protocol[P, R_co]):
+
+    @overload
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R_co:
+        ...
+
+    @overload
+    def __call__(
+        self,
+        *args: Any,
+        cur: Cursor | None = None,
+        **kwargs: Any,
+    ) -> R_co:
+        ...
+
+
 def run_with_pool(
-    row_factory: Any = None
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    row_factory_fn: RowFactory[Any] | None = None
+) -> Callable[
+    [Callable[Concatenate[Cursor, P], R]],
+        RunWithPoolWrappedFunc[P, R],
+]:
     """
     Decorator to inject a cursor into the function.
     If 'cur' is passed, it uses it. Otherwise, it acquires a new connection
     from the pool, creates a cursor, and handles retries on connection loss.
     """
 
-    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(
+        f: Callable[Concatenate[Cursor, P],
+                    R], ) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
         def run(
             *args: Any,
-            cur: Any = None,
+            cur: Cursor | None = None,
             **kwargs: Any,
-        ) -> object:
+        ) -> R:
             if _connector is None:
                 raise PGConnectorError('Not connected')
 
@@ -119,14 +161,17 @@ def run_with_pool(
                 if cur is None:
                     pool = _connector.get()
                     with pool.connection() as conn:
-                        with conn.cursor(row_factory=row_factory) as c0:
+                        if row_factory_fn is None:
+                            with conn.cursor() as c0:
+                                return f(c0, *args, **kwargs)
+                        with conn.cursor(row_factory=row_factory_fn) as c0:
                             return f(c0, *args, **kwargs)
                 else:
                     # Use the provided cursor
                     return f(cur, *args, **kwargs)
             except RuntimeError as e:
                 # If cursor was provided externally, propagate the error
-                if cur:
+                if cur is not None:
                     raise e
 
                 # Retry logic for closed connections
@@ -137,7 +182,7 @@ def run_with_pool(
                     return run(*args, cur=None, **kwargs)
                 raise e
 
-        return run
+        return cast(RunWithPoolWrappedFunc[P, R], run)
 
     return decorator
 
@@ -386,7 +431,7 @@ def count(
     return get_only_default(cur, 0)
 
 
-@run_with_pool(row_factory=dict_row)
+@run_with_pool(row_factory_fn=dict_row)
 def select(
     cur: Cursor,
     table_name: TableName,
@@ -462,7 +507,7 @@ def select_only(
     return [list(x.values())[0] for x in ret]
 
 
-@run_with_pool(row_factory=dict_row)
+@run_with_pool(row_factory_fn=dict_row)
 def select_one(
     cur: Cursor,
     table_name: TableName,
