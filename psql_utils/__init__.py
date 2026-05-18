@@ -8,6 +8,7 @@ from typing import (
     Callable,
     Literal,
     Protocol,
+    SupportsInt,
     TypeVar,
     overload,
     cast,
@@ -391,14 +392,15 @@ async def update(
         columns: list[Column],
         part_sql: str = '',
         args: SQLArgs = (),
-) -> None:
+) -> int:
     """Executes an UPDATE statement."""
     sql = gen.gen_update(
         table_name=table_name,
         columns=columns,
         part_sql=part_sql,
     )
-    await fixed_execute(sql, args)
+    cur = await fixed_execute(sql, args)
+    return cur.rowcount
 
 
 @run_with_pool()
@@ -428,7 +430,7 @@ async def sum(
         join_sql=join_sql,
     )
     await fixed_execute(sql, args)
-    return await get_only_default(0)
+    return int(cast(SupportsInt, await get_only_default(0)))
 
 
 @run_with_pool()
@@ -439,7 +441,7 @@ async def count(
     column: Column = c('*'),
     join_sql: str = '',
     groups: Optional[str] = None,
-) -> object:
+) -> int:
     """Executes a SELECT COUNT query."""
     sql = gen.gen_count(
         table_name=table_name,
@@ -449,7 +451,7 @@ async def count(
         groups=groups,
     )
     await fixed_execute(sql, args)
-    return await get_only_default(0)
+    return int(cast(SupportsInt, await get_only_default(0)))
 
 
 @run_with_pool(row_factory_fn=dict_row)
@@ -582,7 +584,7 @@ async def group_count(
     args: SQLArgs = (),
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
-) -> object:
+) -> int:
     """Executes a COUNT on a grouped subquery."""
     sql = gen.gen_group_count(
         table_name,
@@ -592,4 +594,4 @@ async def group_count(
         sorts=sorts,
     )
     await fixed_execute(sql, args)
-    return await get_only_default(0)
+    return int(cast(SupportsInt, await get_only_default(0)))

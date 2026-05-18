@@ -40,7 +40,7 @@ class CRUD(CrudConfigMixin):
             **kwargs,
         )
 
-    def count(self, *args: Any, **kwargs: Any) -> Any:
+    def count(self, *args: Any, **kwargs: Any) -> int:
         return record_sync.count(
             self.table,
             *args,

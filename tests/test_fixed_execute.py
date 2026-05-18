@@ -4,6 +4,7 @@ from typing import Any, List, Optional
 
 import psql_utils
 import psql_utils.sync as psql_sync
+from psql_utils.types import c, t
 
 
 class _SyncCursor:
@@ -15,9 +16,11 @@ class _SyncCursor:
         self._rows = rows or []
         self.description = description
         self.executed = []
+        self.rowcount = 0
 
     def execute(self, sql: str, args: Any = None) -> None:
         self.executed.append((sql, args))
+        self.rowcount = 1
 
     def fetchall(self) -> List[Any]:
         return self._rows
@@ -35,9 +38,11 @@ class _AsyncCursor:
         self._rows = rows or []
         self.description = description
         self.executed = []
+        self.rowcount = 0
 
     async def execute(self, sql: str, args: Any = None) -> None:
         self.executed.append((sql, args))
+        self.rowcount = 1
 
     async def fetchall(self) -> List[Any]:
         return self._rows
@@ -101,6 +106,17 @@ class FixedExecuteSyncTests(unittest.TestCase):
         with psql_sync.with_cursor(_SyncSingleRowCursor({"x": 1})):
             self.assertEqual(psql_sync.get_only_default(0, "n"), 0)
 
+    def test_update_returns_cursor_rowcount(self) -> None:
+        cur = _SyncCursor()
+        with psql_sync.with_cursor(cur):
+            ret = psql_sync.update(
+                t("users"),
+                [c("name")],
+                part_sql="id=%s",
+                args=("alice", 1),
+            )
+        self.assertEqual(ret, 1)
+
 
 class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_all_as_dict_from_tuple_rows(self) -> None:
@@ -140,3 +156,14 @@ class FixedExecuteAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await psql_utils.get_only_default(0, "n"), 3)
         async with psql_utils.with_cursor(_AsyncSingleRowCursor({"x": 1})):
             self.assertEqual(await psql_utils.get_only_default(0, "n"), 0)
+
+    async def test_update_returns_cursor_rowcount(self) -> None:
+        cur = _AsyncCursor()
+        async with psql_utils.with_cursor(cur):
+            ret = await psql_utils.update(
+                t("users"),
+                [c("name")],
+                part_sql="id=%s",
+                args=("alice", 1),
+            )
+        self.assertEqual(ret, 1)
