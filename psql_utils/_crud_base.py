@@ -62,4 +62,3 @@ def build_crud_instance(
 def build_crud_exports_tuple(crud: Any) -> tuple[Any, Any, Any, Any, Any, Any]:
     """Return common bound methods tuple for CRUD wrappers."""
     return crud, crud.save, crud.get, crud.get_list, crud.count, crud.remove
-

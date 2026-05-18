@@ -3,7 +3,11 @@ from typing import Optional, List, Any, Callable
 
 from .sync import (select_one_only, select_one, select, count as pg_count,
                    update, insert, delete)
-from ._record_shared import normalize_get_inputs, normalize_save_inputs, prepare_get_props
+from ._record_shared import (
+    normalize_get_inputs,
+    normalize_save_inputs,
+    prepare_get_props,
+)
 from .errors import RecordNotFoundError, UniqueConflictError
 from .types import TableName, c, cs
 from .record_utils import (popup_data, EmptyRows, get_uniq_data, prepare_count,
@@ -104,7 +108,8 @@ def save(
     if id is not None:
         old = get(table, id=id)
         if not old:
-            raise RecordNotFoundError(f'Update failed: record [{id}] does not exist')
+            raise RecordNotFoundError(
+                f'Update failed: record [{id}] does not exist')
     else:
         _, uniq_data = get_uniq_data(uniq_keys=uniq_keys, **data)
         old = get(

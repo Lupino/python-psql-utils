@@ -60,9 +60,8 @@ class CRUD(CrudConfigMixin):
 
 
 CrudMethod = Callable[..., Any]
-CrudExports = tuple[
-    CRUD, CrudMethod, CrudMethod, CrudMethod, CrudMethod, CrudMethod
-]
+CrudExports = tuple[CRUD, CrudMethod, CrudMethod, CrudMethod, CrudMethod,
+                    CrudMethod]
 
 
 def build_crud(

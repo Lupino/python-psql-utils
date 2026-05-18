@@ -16,4 +16,3 @@ class RecordNotFoundError(PsqlUtilsError):
 
 class UniqueConflictError(PsqlUtilsError):
     """Raised when a unique-key conflict is detected."""
-

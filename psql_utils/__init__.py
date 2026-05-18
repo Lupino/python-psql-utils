@@ -1,5 +1,15 @@
 from functools import wraps
-from typing import Optional, List, Dict, Any, Callable, Coroutine, Literal, overload, cast
+from typing import (
+    Optional,
+    List,
+    Dict,
+    Any,
+    Callable,
+    Coroutine,
+    Literal,
+    overload,
+    cast,
+)
 
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
@@ -147,7 +157,8 @@ async def fixed_execute(
     args: Any = None,
     fetch: Literal[''] = '',
     as_dict: bool = False,
-) -> AsyncCursor: ...
+) -> AsyncCursor:
+    ...
 
 
 @overload
@@ -157,7 +168,8 @@ async def fixed_execute(
     args: Any = None,
     fetch: Literal['one'] = 'one',
     as_dict: Literal[False] = False,
-) -> Any: ...
+) -> Any:
+    ...
 
 
 @overload
@@ -167,7 +179,8 @@ async def fixed_execute(
     args: Any = None,
     fetch: Literal['one'] = 'one',
     as_dict: Literal[True] = True,
-) -> Optional[Dict[str, Any]]: ...
+) -> Optional[Dict[str, Any]]:
+    ...
 
 
 @overload
@@ -177,7 +190,8 @@ async def fixed_execute(
     args: Any = None,
     fetch: Literal['all'] = 'all',
     as_dict: Literal[False] = False,
-) -> List[Any]: ...
+) -> List[Any]:
+    ...
 
 
 @overload
@@ -187,7 +201,8 @@ async def fixed_execute(
     args: Any = None,
     fetch: Literal['all'] = 'all',
     as_dict: Literal[True] = True,
-) -> List[Dict[str, Any]]: ...
+) -> List[Dict[str, Any]]:
+    ...
 
 
 async def fixed_execute(
@@ -455,13 +470,13 @@ async def select_only(
 
 @run_with_pool(row_factory=dict_row)
 async def select_one(
-        cur: AsyncCursor,
-        table_name: TableName,
-        columns: List[Column],
-        part_sql: str = '',
-        args: Any = (),
-        join_sql: str = '',
-        lock_sql: str = '',
+    cur: AsyncCursor,
+    table_name: TableName,
+    columns: List[Column],
+    part_sql: str = '',
+    args: Any = (),
+    join_sql: str = '',
+    lock_sql: str = '',
 ) -> Optional[Dict[str, Any]]:
     """Executes a SELECT query with LIMIT 1."""
     sql = gen.gen_select_one(

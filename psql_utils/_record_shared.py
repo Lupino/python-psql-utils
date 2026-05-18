@@ -20,7 +20,8 @@ def normalize_save_inputs(
     sub_json_keys: Optional[List[str]],
     replace_keys: Optional[List[str]],
     exclude_data_keys: Optional[List[str]],
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
+) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str],
+           List[str]]:
     """Normalize save() list-like inputs."""
     return (
         keys or [],
@@ -66,4 +67,3 @@ def prepare_get_props(
         )
     except EmptyRows:
         return None
-

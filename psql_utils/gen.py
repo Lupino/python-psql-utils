@@ -4,7 +4,6 @@ from typing import Optional, List, Any, Tuple
 from .types import (TableName, Column, IndexName, get_table_name,
                     columns_to_string, get_index_name)
 
-
 RE_UNSAFE_SQL = re.compile(r';|--|/\*|\*/')
 
 

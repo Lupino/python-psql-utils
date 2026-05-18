@@ -30,4 +30,3 @@ def rows_to_dicts(rows: Any, description: Any) -> List[Dict[str, Any]]:
         return [dict(row) for row in rows]
     cols = [d.name for d in (description or [])]
     return [dict(zip(cols, row)) for row in rows]
-

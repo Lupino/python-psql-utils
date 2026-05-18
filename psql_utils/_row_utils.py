@@ -13,4 +13,3 @@ def get_only_default_from_row(
     if key and isinstance(ret_any, dict):
         return ret_any.get(key, default)
     return ret[0]
-
