@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Optional, List, Dict, Any, Callable, cast
+from typing import Optional, List, Dict, Any, Callable, Literal, overload, cast
 
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
@@ -7,6 +7,8 @@ from psycopg.rows import dict_row
 
 from .types import TableName, Column, IndexName, c
 from . import gen
+from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
+from ._pool_utils import is_closing_runtime_error
 
 
 class PGConnectorError(Exception):
@@ -119,30 +121,77 @@ def run_with_pool(
                     raise e
 
                 # Retry logic for closed connections
-                err_msg = str(e)
-                if 'closing' in err_msg:
-                    connected = _connector.connect()
-                    if connected:
-                        return run(*args, **kwargs)
-                    else:
-                        raise e
-                else:
+                if not is_closing_runtime_error(e):
                     raise e
+                connected = _connector.connect()
+                if connected:
+                    return run(*args, **kwargs)
+                raise e
 
         return run
 
     return decorator
 
 
+@overload
 def fixed_execute(
     cur: Cursor,
     sql: str,
     args: Any = None,
-    fetch: str = '',
+    fetch: Literal[''] = '',
+    as_dict: bool = False,
+) -> Cursor: ...
+
+
+@overload
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: Literal['one'] = 'one',
+    as_dict: Literal[False] = False,
+) -> Any: ...
+
+
+@overload
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: Literal['one'] = 'one',
+    as_dict: Literal[True] = True,
+) -> Optional[Dict[str, Any]]: ...
+
+
+@overload
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: Literal['all'] = 'all',
+    as_dict: Literal[False] = False,
+) -> List[Any]: ...
+
+
+@overload
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: Literal['all'] = 'all',
+    as_dict: Literal[True] = True,
+) -> List[Dict[str, Any]]: ...
+
+
+def fixed_execute(
+    cur: Cursor,
+    sql: str,
+    args: Any = None,
+    fetch: Literal['', 'one', 'all'] = '',
     as_dict: bool = False,
 ) -> Any:
     """Execute SQL; optionally fetch one/all rows and map rows to dict."""
-    if args and len(args) > 0:
+    if has_sql_args(args):
         cur.execute(sql, args)
     else:
         cur.execute(sql)
@@ -152,23 +201,14 @@ def fixed_execute(
             return None
         if not as_dict:
             return ret
-        ret_any: Any = ret
-        if isinstance(ret_any, dict):
-            return dict(ret_any)
-        cols = [d.name for d in (cur.description or [])]
-        return dict(zip(cols, ret))
+        return row_to_dict(ret, cur.description)
     if fetch == 'all':
         rows = cur.fetchall()
         if not as_dict:
             return rows
-        if not rows:
-            return []
-        first = rows[0]
-        first_any: Any = first
-        if isinstance(first_any, dict):
-            return [dict(row) for row in rows]
-        cols = [d.name for d in (cur.description or [])]
-        return [dict(zip(cols, row)) for row in rows]
+        return rows_to_dicts(rows, cur.description)
+    if fetch:
+        raise ValueError(f'unsupported fetch mode: {fetch}')
     return cur
 
 
