@@ -1,5 +1,5 @@
 from time import time
-from typing import Optional, List, Any, Callable
+from typing import Optional, Any, Callable, SupportsInt, cast
 
 from .sync import (select_one_only, select_one, select, count as pg_count,
                    update, insert, delete)
@@ -18,14 +18,14 @@ def get(
     table: TableName,
     *,
     id: Optional[int] = None,
-    uniq_keys: Optional[List[str]] = None,
-    optional_keys: Optional[List[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    optional_keys: Optional[list[str]] = None,
     required_uniq_keys: bool = True,
     ignore_extra_keys: bool = False,
-    fields: Optional[List[str]] = None,
+    fields: Optional[list[str]] = None,
     popup: bool = False,
     **data: Any,
-) -> Any:
+) -> Optional[dict[str, object]]:
     """
     Retrieves a single record synchronously by ID or unique keys.
     """
@@ -53,16 +53,16 @@ def get(
         if not id_val:
             return None
         props = prepare_get_by_id(
-            id=id_val,
+            id=cast(int, id_val),
             fields=fields,
             ignore_extra_keys=ignore_extra_keys,
             **data,
         )
 
-    ret = select_one(table, **props)
+    ret = cast(Optional[dict[str, object]], select_one(table, **props))
 
     if popup:
-        return popup_data(ret)
+        return cast(Optional[dict[str, object]], popup_data(ret))
 
     return ret
 
@@ -71,16 +71,17 @@ def save(
     table: TableName,
     *,
     id: Optional[int] = None,
-    keys: Optional[List[str]] = None,
-    uniq_keys: Optional[List[str]] = None,
-    optional_keys: Optional[List[str]] = None,
-    json_keys: Optional[List[str]] = None,
-    sub_json_keys: Optional[List[str]] = None,
-    replace_keys: Optional[List[str]] = None,
-    exclude_data_keys: Optional[List[str]] = None,
-    on_saved: Optional[Callable[[Any, int], Any]] = None,
+    keys: Optional[list[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    optional_keys: Optional[list[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    sub_json_keys: Optional[list[str]] = None,
+    replace_keys: Optional[list[str]] = None,
+    exclude_data_keys: Optional[list[str]] = None,
+    on_saved: Optional[Callable[[Optional[dict[str, object]], int],
+                                Any]] = None,
     **data: Any,
-) -> Any:
+) -> int:
     """
     Inserts or updates a record synchronously.
     - If 'id' is provided, attempts an update.
@@ -150,20 +151,20 @@ def save(
                 **uniq_full_data,
             )
             if existing_conflict:
-                oid = existing_conflict['id']
+                oid = cast(int, existing_conflict['id'])
                 raise UniqueConflictError(
                     f'Cannot update: unique value conflicts with record {oid}')
 
         # Optimization: Return early if no data changed
         if len(args) == 0:
-            return old['id']
+            return cast(int, old['id'])
 
         args.append(old['id'])
         update(table, cs(rkeys), 'id=%s', tuple(args))
 
         if on_saved:
-            on_saved(old, old['id'])
-        return old['id']
+            on_saved(old, cast(int, old['id']))
+        return cast(int, old['id'])
 
     else:
         # Insert path
@@ -171,7 +172,7 @@ def save(
             rkeys.append('created_at')
             args.append(int(time()))
 
-        nid = insert(table, cs(rkeys), tuple(args), c('id'))
+        nid = cast(int, insert(table, cs(rkeys), tuple(args), c('id')))
         if on_saved:
             on_saved(None, nid)
 
@@ -181,7 +182,7 @@ def save(
 def remove(
     table: TableName,
     *args: Any,
-    on_removed: Optional[Callable[[Any], Any]] = None,
+    on_removed: Optional[Callable[[dict[str, object]], Any]] = None,
     **kwargs: Any,
 ) -> bool:
     """
@@ -204,7 +205,7 @@ def remove(
 def count(table: TableName, *args: Any, **kwargs: Any) -> int:
     """Returns the count of records matching criteria."""
     props = prepare_count(*args, **kwargs)
-    return int(pg_count(table, **props))
+    return int(cast(SupportsInt, pg_count(table, **props)))
 
 
 def get_list(
@@ -214,7 +215,7 @@ def get_list(
     size: Optional[int] = None,
     popup: bool = False,
     **kwargs: Any,
-) -> Any:
+) -> list[dict[str, object]]:
     """
     Retrieves a list of records.
     Returns an empty list if criteria results in an EmptyRows exception.
@@ -224,9 +225,12 @@ def get_list(
     except EmptyRows:
         return []
 
-    ret = select(table, offset=offset, size=size, **props)
+    ret = cast(
+        list[dict[str, object]],
+        select(table, offset=offset, size=size, **props),
+    )
 
     if popup:
-        return [popup_data(v) for v in ret]
+        return [cast(dict[str, object], popup_data(v)) for v in ret]
 
     return ret

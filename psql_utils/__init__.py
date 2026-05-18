@@ -1,15 +1,14 @@
 from functools import wraps
 from typing import (
-    Optional,
-    List,
-    Dict,
     Any,
+    Optional,
+    Awaitable,
     Callable,
-    Coroutine,
     Literal,
     overload,
     cast,
 )
+from collections.abc import Mapping
 
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
@@ -20,6 +19,7 @@ from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
 from ._row_utils import get_only_default_from_row
+from ._typing import Description, RowDict, RowValue, Rows, SQLArgs
 from .errors import QueryResultError
 
 
@@ -30,10 +30,10 @@ class PGConnectorError(Exception):
 
 class PGConnector:
     """Manages the async connection pool for PostgreSQL."""
-    config: Dict[str, Any]
+    config: Mapping[str, object]
     pool: Optional[AsyncConnectionPool]
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Mapping[str, object]):
         self.config = config
         self.pool = None
 
@@ -54,8 +54,9 @@ class PGConnector:
 
         # Create new pool
         kwargs = {'autocommit': True}
+        dsn = cast(str, self.config['dsn'])
         self.pool = AsyncConnectionPool(
-            self.config['dsn'],
+            dsn,
             kwargs=kwargs,
             open=False,
         )
@@ -67,7 +68,7 @@ class PGConnector:
 # Global singleton connector instance
 _connector: Optional[PGConnector] = None
 # List of callbacks to run upon successful connection
-_connected_events: List[Callable[[], Coroutine[Any, Any, Any]]] = []
+_connected_events: list[Callable[[], Awaitable[object]]] = []
 
 
 def get_connector() -> PGConnector:
@@ -77,12 +78,12 @@ def get_connector() -> PGConnector:
     return _connector
 
 
-def on_connected(func: Callable[[], Coroutine[Any, Any, Any]]) -> None:
+def on_connected(func: Callable[[], Awaitable[object]]) -> None:
     """Registers a callback function to be awaited after connection."""
     _connected_events.append(func)
 
 
-async def connect(config: Any) -> bool:
+async def connect(config: Mapping[str, object]) -> bool:
     """Initializes the global connector and triggers events."""
     global _connector
     _connector = PGConnector(config)
@@ -103,12 +104,14 @@ async def close() -> None:
     await pool.close()
 
 
-RunWithPoolFunc = Callable[..., Coroutine[Any, Any, Any]]
+RunWithPoolFunc = Callable[..., Awaitable[object]]
+FixedExecuteReturn = AsyncCursor | RowValue | RowDict | Rows | list[
+    RowDict] | None
 
 
 def run_with_pool(
-    row_factory: Any = None
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    row_factory: Any = None,
+) -> Callable[[RunWithPoolFunc], RunWithPoolFunc]:
     """
     Decorator to inject a cursor into the function.
     If 'cur' is passed, it uses it. Otherwise, it acquires a new connection
@@ -118,7 +121,11 @@ def run_with_pool(
     def decorator(f: RunWithPoolFunc) -> RunWithPoolFunc:
 
         @wraps(f)
-        async def run(*args: Any, cur: Any = None, **kwargs: Any) -> Any:
+        async def run(
+            *args: Any,
+            cur: Any = None,
+            **kwargs: Any,
+        ) -> object:
             if _connector is None:
                 raise PGConnectorError('Not connected')
 
@@ -142,7 +149,7 @@ def run_with_pool(
                     raise e
                 connected = await _connector.connect()
                 if connected:
-                    return await run(*args, **kwargs)
+                    return await run(*args, cur=None, **kwargs)
                 raise e
 
         return run
@@ -154,7 +161,7 @@ def run_with_pool(
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal[''] = '',
     as_dict: bool = False,
 ) -> AsyncCursor:
@@ -165,10 +172,10 @@ async def fixed_execute(
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
     as_dict: Literal[False] = False,
-) -> Any:
+) -> RowValue | None:
     ...
 
 
@@ -176,10 +183,10 @@ async def fixed_execute(
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal['one'] = 'one',
     as_dict: Literal[True] = True,
-) -> Optional[Dict[str, Any]]:
+) -> RowDict | None:
     ...
 
 
@@ -187,10 +194,10 @@ async def fixed_execute(
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
     as_dict: Literal[False] = False,
-) -> List[Any]:
+) -> Rows:
     ...
 
 
@@ -198,20 +205,20 @@ async def fixed_execute(
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
     as_dict: Literal[True] = True,
-) -> List[Dict[str, Any]]:
+) -> list[RowDict]:
     ...
 
 
 async def fixed_execute(
     cur: AsyncCursor,
     sql: str,
-    args: Any = None,
+    args: SQLArgs | None = None,
     fetch: Literal['', 'one', 'all'] = '',
     as_dict: bool = False,
-) -> Any:
+) -> FixedExecuteReturn:
     """Execute SQL; optionally fetch one/all rows and map rows to dict."""
     if has_sql_args(args):
         await cur.execute(sql, args)
@@ -223,12 +230,12 @@ async def fixed_execute(
             return None
         if not as_dict:
             return ret
-        return row_to_dict(ret, cur.description)
+        return row_to_dict(ret, cast(Description, cur.description))
     if fetch == 'all':
         rows = await cur.fetchall()
         if not as_dict:
             return rows
-        return rows_to_dicts(rows, cur.description)
+        return rows_to_dicts(rows, cast(Description, cur.description))
     if fetch:
         raise ValueError(f'unsupported fetch mode: {fetch}')
     return cur
@@ -238,7 +245,7 @@ async def fixed_execute(
 async def create_table(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
+    columns: list[Column],
 ) -> None:
     """Executes a CREATE TABLE statement."""
     await fixed_execute(cur, gen.gen_create_table(table_name, columns))
@@ -248,7 +255,7 @@ async def create_table(
 async def add_table_column(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
+    columns: list[Column],
 ) -> None:
     """Executes an ALTER TABLE ADD COLUMN statement."""
     await fixed_execute(cur, gen.gen_add_table_column(table_name, columns))
@@ -260,7 +267,7 @@ async def create_index(
     uniq: bool,
     table_name: TableName,
     index_name: IndexName,
-    columns: List[Column],
+    columns: list[Column],
 ) -> None:
     """Executes a CREATE INDEX statement."""
     sql = gen.gen_create_index(uniq, table_name, index_name, columns)
@@ -269,9 +276,9 @@ async def create_index(
 
 async def get_only_default(
     cur: AsyncCursor,
-    default: Any,
+    default: object,
     key: Optional[str] = None,
-) -> Any:
+) -> object:
     """Fetches a single value or returns a default."""
     ret = await cur.fetchone()
     return get_only_default_from_row(ret, default, key)
@@ -281,13 +288,13 @@ async def get_only_default(
 async def insert(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
-    args: Any,
+    columns: list[Column],
+    args: SQLArgs,
     ret_column: Optional[Column] = None,
-    ret_def: Optional[Any] = None,
+    ret_def: Optional[object] = None,
     required: bool = False,
     err_msg: str = 'insert failed',
-) -> Any:
+) -> object | None:
     """Executes an INSERT statement and optionally returns a value."""
     sql = gen.gen_insert(
         table_name=table_name,
@@ -308,11 +315,11 @@ async def insert(
 async def insert_or_update(
         cur: AsyncCursor,
         table_name: TableName,
-        uniq_columns: List[Column],
-        value_columns: Optional[List[Column]] = None,
-        other_columns: Optional[List[Column]] = None,
-        args: Any = (),
-) -> Any:
+        uniq_columns: list[Column],
+        value_columns: Optional[list[Column]] = None,
+        other_columns: Optional[list[Column]] = None,
+        args: SQLArgs = (),
+) -> None:
     """Executes an INSERT ON CONFLICT DO UPDATE statement."""
     sql = gen.gen_insert_or_update(
         table_name=table_name,
@@ -327,9 +334,9 @@ async def insert_or_update(
 async def update(
         cur: AsyncCursor,
         table_name: TableName,
-        columns: List[Column],
+        columns: list[Column],
         part_sql: str = '',
-        args: Any = (),
+        args: SQLArgs = (),
 ) -> None:
     """Executes an UPDATE statement."""
     sql = gen.gen_update(
@@ -345,7 +352,7 @@ async def delete(
         cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
-        args: Any = (),
+        args: SQLArgs = (),
 ) -> None:
     """Executes a DELETE statement."""
     sql = gen.gen_delete(table_name=table_name, part_sql=part_sql)
@@ -357,10 +364,10 @@ async def sum(
         cur: AsyncCursor,
         table_name: TableName,
         part_sql: str = '',
-        args: Any = (),
+        args: SQLArgs = (),
         column: Column = c('*'),
         join_sql: str = '',
-) -> Any:
+) -> object:
     """Executes a SELECT SUM query."""
     sql = gen.gen_sum(
         table_name=table_name,
@@ -377,11 +384,11 @@ async def count(
     cur: AsyncCursor,
     table_name: TableName,
     part_sql: str = '',
-    args: Any = (),
+    args: SQLArgs = (),
     column: Column = c('*'),
     join_sql: str = '',
     groups: Optional[str] = None,
-) -> Any:
+) -> object:
     """Executes a SELECT COUNT query."""
     sql = gen.gen_count(
         table_name=table_name,
@@ -398,9 +405,9 @@ async def count(
 async def select(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
+    columns: list[Column],
     part_sql: str = '',
-    args: Any = (),
+    args: SQLArgs = (),
     offset: Optional[int] = None,
     size: Optional[int] = None,
     groups: Optional[str] = None,
@@ -410,7 +417,7 @@ async def select(
     one: bool = False,
     required: bool = False,
     err_msg: str = 'select result is empty',
-) -> Any:
+) -> list[RowDict] | RowDict | None:
     """Executes a SELECT query and returns a list of dictionaries."""
     if one and size is None:
         size = 1
@@ -426,7 +433,7 @@ async def select(
         lock_sql=lock_sql,
     )
     rows = cast(
-        List[Dict[str, Any]],
+        list[RowDict],
         await fixed_execute(cur, sql, args, fetch='all', as_dict=True),
     )
     if one:
@@ -443,27 +450,31 @@ async def select_only(
     table_name: TableName,
     column: Column,
     part_sql: str = '',
-    args: Any = (),
+    args: SQLArgs = (),
     offset: Optional[int] = None,
     size: Optional[int] = None,
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
     join_sql: str = '',
     lock_sql: str = '',
-) -> List[Any]:
+) -> list[object]:
     """Wraps select to return a list of single values (e.g. list of IDs)."""
-    ret = await select(
-        cur=None,  # Passed as None to trigger pool acquisition in decorator
-        table_name=table_name,
-        columns=[column],
-        part_sql=part_sql,
-        args=args,
-        offset=offset,
-        size=size,
-        groups=groups,
-        sorts=sorts,
-        join_sql=join_sql,
-        lock_sql=lock_sql,
+    ret = cast(
+        list[RowDict],
+        await select(
+            # Passed as None to trigger pool acquisition in decorator.
+            cur=None,
+            table_name=table_name,
+            columns=[column],
+            part_sql=part_sql,
+            args=args,
+            offset=offset,
+            size=size,
+            groups=groups,
+            sorts=sorts,
+            join_sql=join_sql,
+            lock_sql=lock_sql,
+        ),
     )
     return [list(x.values())[0] for x in ret]
 
@@ -472,12 +483,12 @@ async def select_only(
 async def select_one(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
+    columns: list[Column],
     part_sql: str = '',
-    args: Any = (),
+    args: SQLArgs = (),
     join_sql: str = '',
     lock_sql: str = '',
-) -> Optional[Dict[str, Any]]:
+) -> Optional[RowDict]:
     """Executes a SELECT query with LIMIT 1."""
     sql = gen.gen_select_one(
         table_name=table_name,
@@ -487,28 +498,31 @@ async def select_one(
         lock_sql=lock_sql,
     )
     return cast(
-        Optional[Dict[str, Any]],
+        Optional[RowDict],
         await fixed_execute(cur, sql, args, fetch='one', as_dict=True),
     )
 
 
 async def select_one_only(
-        table_name: TableName,
-        column: Column,
-        part_sql: str = '',
-        args: Any = (),
-        join_sql: str = '',
-        lock_sql: str = '',
-) -> Any:
+    table_name: TableName,
+    column: Column,
+    part_sql: str = '',
+    args: SQLArgs = (),
+    join_sql: str = '',
+    lock_sql: str = '',
+) -> object | None:
     """Wraps select_one to return a single scalar value."""
-    ret = await select_one(
-        cur=None,
-        table_name=table_name,
-        columns=[column],
-        part_sql=part_sql,
-        args=args,
-        join_sql=join_sql,
-        lock_sql=lock_sql,
+    ret = cast(
+        Optional[RowDict],
+        await select_one(
+            cur=None,
+            table_name=table_name,
+            columns=[column],
+            part_sql=part_sql,
+            args=args,
+            join_sql=join_sql,
+            lock_sql=lock_sql,
+        ),
     )
     if ret:
         return list(ret.values())[0]
@@ -526,12 +540,12 @@ async def drop_table(cur: AsyncCursor, table_name: TableName) -> None:
 async def group_count(
     cur: AsyncCursor,
     table_name: TableName,
-    columns: List[Column],
+    columns: list[Column],
     part_sql: str = '',
-    args: Any = (),
+    args: SQLArgs = (),
     groups: Optional[str] = None,
     sorts: Optional[str] = None,
-) -> Any:
+) -> object:
     """Executes a COUNT on a grouped subquery."""
     sql = gen.gen_group_count(
         table_name,

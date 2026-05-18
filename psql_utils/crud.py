@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Optional, TypeAlias
 
 from . import record
 from ._crud_base import (
@@ -59,20 +59,26 @@ class CRUD(CrudConfigMixin):
         )
 
 
-CrudMethod = Callable[..., Awaitable[Any]]
-CrudExports = tuple[CRUD, CrudMethod, CrudMethod, CrudMethod, CrudMethod,
-                    CrudMethod]
+CrudMethod: TypeAlias = Callable[..., Awaitable[Any]]
+CrudExports: TypeAlias = tuple[
+    CRUD,
+    CrudMethod,
+    CrudMethod,
+    CrudMethod,
+    CrudMethod,
+    CrudMethod,
+]
 
 
 def build_crud(
     table: TableName,
     *,
-    keys: Optional[List[str]] = None,
-    uniq_keys: Optional[List[str]] = None,
-    json_keys: Optional[List[str]] = None,
-    save_kwargs: Optional[Dict[str, Any]] = None,
-    get_kwargs: Optional[Dict[str, Any]] = None,
-    query_kwargs: Optional[Dict[str, Any]] = None,
+    keys: Optional[list[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    save_kwargs: Optional[dict[str, Any]] = None,
+    get_kwargs: Optional[dict[str, Any]] = None,
+    query_kwargs: Optional[dict[str, Any]] = None,
 ) -> CRUD:
     """Build a CRUD helper object for db modules."""
     return build_crud_instance(
@@ -90,12 +96,12 @@ def build_crud(
 def build_crud_exports(
     table: TableName,
     *,
-    keys: Optional[List[str]] = None,
-    uniq_keys: Optional[List[str]] = None,
-    json_keys: Optional[List[str]] = None,
-    save_kwargs: Optional[Dict[str, Any]] = None,
-    get_kwargs: Optional[Dict[str, Any]] = None,
-    query_kwargs: Optional[Dict[str, Any]] = None,
+    keys: Optional[list[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    save_kwargs: Optional[dict[str, Any]] = None,
+    get_kwargs: Optional[dict[str, Any]] = None,
+    query_kwargs: Optional[dict[str, Any]] = None,
 ) -> CrudExports:
     """Build CRUD and return common bound methods as a tuple."""
     crud = build_crud(

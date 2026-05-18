@@ -1,15 +1,20 @@
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Optional
+
+from ._typing import RowValue, TDefault
 
 
 def get_only_default_from_row(
-    ret: Any,
-    default: Any,
+    ret: RowValue | None,
+    default: TDefault,
     key: Optional[str] = None,
-) -> Any:
+) -> object | TDefault:
     """Extract scalar value from a fetched row, with default fallback."""
     if ret is None:
         return default
-    ret_any: Any = ret
-    if key and isinstance(ret_any, dict):
-        return ret_any.get(key, default)
+    if isinstance(ret, Mapping):
+        if key:
+            return ret.get(key, default)
+        values = iter(ret.values())
+        return next(values, default)
     return ret[0]

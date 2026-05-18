@@ -1,27 +1,27 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from .record_utils import EmptyRows, prepare_get_by_id, prepare_get_by_uniq
 
 
 def normalize_get_inputs(
-    uniq_keys: Optional[List[str]],
-    optional_keys: Optional[List[str]],
-    fields: Optional[List[str]],
-) -> Tuple[List[str], List[str], List[str]]:
+    uniq_keys: Optional[list[str]],
+    optional_keys: Optional[list[str]],
+    fields: Optional[list[str]],
+) -> tuple[list[str], list[str], list[str]]:
     """Normalize get() list-like inputs."""
     return uniq_keys or [], optional_keys or [], fields or ['*']
 
 
 def normalize_save_inputs(
-    keys: Optional[List[str]],
-    uniq_keys: Optional[List[str]],
-    optional_keys: Optional[List[str]],
-    json_keys: Optional[List[str]],
-    sub_json_keys: Optional[List[str]],
-    replace_keys: Optional[List[str]],
-    exclude_data_keys: Optional[List[str]],
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str],
-           List[str]]:
+    keys: Optional[list[str]],
+    uniq_keys: Optional[list[str]],
+    optional_keys: Optional[list[str]],
+    json_keys: Optional[list[str]],
+    sub_json_keys: Optional[list[str]],
+    replace_keys: Optional[list[str]],
+    exclude_data_keys: Optional[list[str]],
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str],
+           list[str]]:
     """Normalize save() list-like inputs."""
     return (
         keys or [],
@@ -37,13 +37,13 @@ def normalize_save_inputs(
 def prepare_get_props(
     *,
     id: Optional[int],
-    uniq_keys: List[str],
-    optional_keys: List[str],
+    uniq_keys: list[str],
+    optional_keys: list[str],
     required_uniq_keys: bool,
     ignore_extra_keys: bool,
-    fields: List[str],
-    data: Dict[str, Any],
-) -> Optional[Tuple[bool, Dict[str, Any]]]:
+    fields: list[str],
+    data: dict[str, Any],
+) -> Optional[tuple[bool, dict[str, Any]]]:
     """
     Prepare get/select props.
     Returns None when conditions imply empty rows.

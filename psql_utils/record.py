@@ -1,6 +1,6 @@
 import asyncio
 from time import time
-from typing import Optional, List, Any, Callable
+from typing import Optional, Any, Callable, SupportsInt, cast
 
 from . import (select_one_only, select_one, select, count as pg_count, update,
                insert, delete)
@@ -19,14 +19,14 @@ async def get(
     table: TableName,
     *,
     id: Optional[int] = None,
-    uniq_keys: Optional[List[str]] = None,
-    optional_keys: Optional[List[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    optional_keys: Optional[list[str]] = None,
     required_uniq_keys: bool = True,
     ignore_extra_keys: bool = False,
-    fields: Optional[List[str]] = None,
+    fields: Optional[list[str]] = None,
     popup: bool = False,
     **data: Any,
-) -> Any:
+) -> Optional[dict[str, object]]:
     """
     Retrieves a single record from the database by ID or unique keys.
     """
@@ -54,16 +54,16 @@ async def get(
         if not id_val:
             return None
         props = prepare_get_by_id(
-            id=id_val,
+            id=cast(int, id_val),
             fields=fields,
             ignore_extra_keys=ignore_extra_keys,
             **data,
         )
 
-    ret = await select_one(table, **props)
+    ret = cast(Optional[dict[str, object]], await select_one(table, **props))
 
     if popup:
-        return popup_data(ret)
+        return cast(Optional[dict[str, object]], popup_data(ret))
 
     return ret
 
@@ -72,16 +72,17 @@ async def save(
     table: TableName,
     *,
     id: Optional[int] = None,
-    keys: Optional[List[str]] = None,
-    uniq_keys: Optional[List[str]] = None,
-    optional_keys: Optional[List[str]] = None,
-    json_keys: Optional[List[str]] = None,
-    sub_json_keys: Optional[List[str]] = None,
-    replace_keys: Optional[List[str]] = None,
-    exclude_data_keys: Optional[List[str]] = None,
-    on_saved: Optional[Callable[[Any, int], Any]] = None,
+    keys: Optional[list[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    optional_keys: Optional[list[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    sub_json_keys: Optional[list[str]] = None,
+    replace_keys: Optional[list[str]] = None,
+    exclude_data_keys: Optional[list[str]] = None,
+    on_saved: Optional[Callable[[Optional[dict[str, object]], int],
+                                Any]] = None,
     **data: Any,
-) -> Any:
+) -> int:
     """
     Inserts or updates a record.
     If 'id' is provided, it attempts to update.
@@ -152,22 +153,22 @@ async def save(
                 **uniq_full_data,
             )
             if existing_conflict:
-                oid = existing_conflict['id']
+                oid = cast(int, existing_conflict['id'])
                 raise UniqueConflictError(
                     f'Cannot update: unique value conflicts with record {oid}')
 
         # Optimization: If no fields changed, return existing ID immediately
         if len(args) == 0:
-            return old['id']
+            return cast(int, old['id'])
 
         args.append(old['id'])
         await update(table, cs(rkeys), 'id=%s', tuple(args))
 
         if on_saved:
-            ret = on_saved(old, old['id'])
+            ret = on_saved(old, cast(int, old['id']))
             if asyncio.iscoroutine(ret):
                 await ret
-        return old['id']
+        return cast(int, old['id'])
 
     else:
         # Insert new record
@@ -175,7 +176,7 @@ async def save(
             rkeys.append('created_at')
             args.append(int(time()))
 
-        nid = await insert(table, cs(rkeys), tuple(args), c('id'))
+        nid = cast(int, await insert(table, cs(rkeys), tuple(args), c('id')))
 
         if on_saved:
             ret = on_saved(None, nid)
@@ -188,7 +189,7 @@ async def save(
 async def remove(
     table: TableName,
     *args: Any,
-    on_removed: Optional[Callable[[Any], Any]] = None,
+    on_removed: Optional[Callable[[dict[str, object]], Any]] = None,
     **kwargs: Any,
 ) -> bool:
     """
@@ -220,7 +221,7 @@ async def remove(
 async def count(table: TableName, *args: Any, **kwargs: Any) -> int:
     """Returns the count of records matching the criteria."""
     props = prepare_count(*args, **kwargs)
-    return int(await pg_count(table, **props))
+    return int(cast(SupportsInt, await pg_count(table, **props)))
 
 
 async def get_list(
@@ -230,7 +231,7 @@ async def get_list(
     size: Optional[int] = None,
     popup: bool = False,
     **kwargs: Any,
-) -> Any:
+) -> list[dict[str, object]]:
     """
     Retrieves a list of records matching the criteria.
     Handles EmptyRows exceptions gracefully by returning an empty list.
@@ -240,9 +241,12 @@ async def get_list(
     except EmptyRows:
         return []
 
-    ret = await select(table, offset=offset, size=size, **props)
+    ret = cast(
+        list[dict[str, object]],
+        await select(table, offset=offset, size=size, **props),
+    )
 
     if popup:
-        return [popup_data(v) for v in ret]
+        return [cast(dict[str, object], popup_data(v)) for v in ret]
 
     return ret

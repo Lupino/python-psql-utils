@@ -1,7 +1,8 @@
 import json
 import re
 from time import time
-from typing import Optional, List, Dict, Any, Tuple
+from collections.abc import Mapping
+from typing import Optional, Any
 
 from .types import c, cs
 from .errors import ValidationError
@@ -51,7 +52,7 @@ def validate_sql_fragment(
         raise ValueError(f'{name} must start with SELECT')
 
 
-def merge_json(new: Any, old: Any) -> Any:
+def merge_json(new: object, old: object) -> object:
     """Recursively updates a dictionary if both inputs are dicts."""
     if isinstance(new, dict) and isinstance(old, dict):
         old.update(new)
@@ -60,10 +61,10 @@ def merge_json(new: Any, old: Any) -> Any:
 
 
 def merge_sub_json(
-    data0: Any,
-    data1: Any,
-    replace_keys: Optional[List[str]] = None,
-) -> Any:
+    data0: object,
+    data1: object,
+    replace_keys: Optional[list[str]] = None,
+) -> object:
     """Merges specific sub-dictionaries, skipping keys in replace_keys."""
     if not isinstance(data0, dict):
         return data0
@@ -84,9 +85,9 @@ def merge_sub_json(
 
 
 def append_extra(
-    part_sql: List[str],
-    args: List[Any],
-    data: Dict[str, Any],
+    part_sql: list[str],
+    args: list[object],
+    data: Mapping[str, object],
 ) -> None:
     """Appends remaining dictionary items as standard equality checks."""
     for key, val in data.items():
@@ -96,15 +97,15 @@ def append_extra(
 
 
 def prepare_save(
-    keys: Optional[List[str]] = None,
-    uniq_keys: Optional[List[str]] = None,
-    exclude_data_keys: Optional[List[str]] = None,
-    json_keys: Optional[List[str]] = None,
-    replace_keys: Optional[List[str]] = None,
-    sub_json_keys: Optional[List[str]] = None,
-    old_record: Optional[Any] = None,
-    **data: Any,
-) -> Tuple[List[str], List[Any]]:
+    keys: Optional[list[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    exclude_data_keys: Optional[list[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    replace_keys: Optional[list[str]] = None,
+    sub_json_keys: Optional[list[str]] = None,
+    old_record: Optional[Mapping[str, object]] = None,
+    **data: object,
+) -> tuple[list[str], list[object]]:
     """
     Prepares columns and arguments for an INSERT or UPDATE statement.
     Handles JSON merging and modification checks against old_record.
@@ -161,13 +162,13 @@ def prepare_save(
 
 
 def get_uniq_data(
-    uniq_keys: Optional[List[str]] = None,
-    old_record: Optional[Any] = None,
-    **data: Any,
-) -> Tuple[bool, Dict[str, Any]]:
+    uniq_keys: Optional[list[str]] = None,
+    old_record: Optional[Mapping[str, object]] = None,
+    **data: object,
+) -> tuple[bool, dict[str, Any]]:
     """Determines if unique keys have changed compared to the old record."""
     uniq_keys = uniq_keys or []
-    uniq_data: Dict[str, Any] = {}
+    uniq_data: dict[str, Any] = {}
     uniq_changed = False
 
     for key in uniq_keys:
@@ -188,7 +189,7 @@ def get_uniq_data(
     return uniq_changed, uniq_data
 
 
-def guess_type(val: Any) -> str:
+def guess_type(val: object) -> str:
     """Attempts to infer the SQL type from a Python value."""
     if isinstance(val, bytes):
         val = str(val, 'utf-8')
@@ -213,9 +214,9 @@ def guess_type(val: Any) -> str:
 
 def format_key(
     key: str,
-    val: Any,
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    val: object,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
 ) -> str:
     """
     Formats a dictionary key into a SQL column or JSON path selector.
@@ -282,10 +283,10 @@ def format_key(
 
 
 def format_fields(
-    fields: List[str],
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
-) -> List[str]:
+    fields: list[str],
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
+) -> list[str]:
     """Formats a list of field names."""
     return [
         format_key(f.strip(), None, json_keys=json_keys, keys=keys)
@@ -295,8 +296,8 @@ def format_fields(
 
 def format_groups(
     groups: Optional[str],
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
 ) -> Optional[str]:
     """Formats a comma-separated string of GROUP BY fields."""
     if not groups:
@@ -310,8 +311,8 @@ def format_groups(
 
 def format_sorts_one(
     sorts: Optional[str],
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
 ) -> Optional[str]:
     """Formats a single ORDER BY clause."""
     if not sorts:
@@ -331,8 +332,8 @@ def format_sorts_one(
 
 def format_sorts(
     sorts: Optional[str],
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
 ) -> Optional[str]:
     """Formats a comma-separated string of ORDER BY clauses."""
     if not sorts:
@@ -349,11 +350,11 @@ def format_sorts(
 
 
 def append_query(
-    query: List[Tuple[str, str, Any]],
+    query: list[tuple[str, str, object]],
     key: str,
-    val: Any,
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    val: object,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
 ) -> None:
     """Parses a key/value pair and appends it to the query list."""
     if val is None:
@@ -398,9 +399,9 @@ def append_query(
 
 
 def sort_query(
-    query: List[Tuple[str, str, Any]],
-    sort_keys: List[str],
-) -> List[Tuple[str, str, Any]]:
+    query: list[tuple[str, str, object]],
+    sort_keys: list[str],
+) -> list[tuple[str, str, object]]:
     """Reorders query parameters based on a priority list."""
     ret = []
     other = []
@@ -421,10 +422,10 @@ def sort_query(
 
 
 def record_query_to_sql(
-        query: List[Tuple[str, str, Any]],
+        query: list[tuple[str, str, object]],
         part_sql: str = '',
-        args: Tuple[Any, ...] = (),
-) -> Tuple[str, Tuple[Any, ...]]:
+        args: tuple[object, ...] = (),
+) -> tuple[str, tuple[object, ...]]:
     """Compiles the query list into a final SQL WHERE string and args."""
     new_part_sql = []
     new_args = []
@@ -449,18 +450,18 @@ def record_query_to_sql(
 
 def gen_query(
     *args: Any,
-    sort_keys: Optional[List[str]] = None,
+    sort_keys: Optional[list[str]] = None,
     part_sql: str = '',
-    json_keys: Optional[List[str]] = None,
-    keys: Optional[List[str]] = None,
+    json_keys: Optional[list[str]] = None,
+    keys: Optional[list[str]] = None,
     **data: Any,
-) -> Tuple[str, Any]:
+) -> tuple[str, tuple[Any, ...]]:
     """Main entry point to generate SQL WHERE clauses from dict data."""
     sort_keys = sort_keys or []
     json_keys = json_keys or []
     keys = keys or []
 
-    query: List[Tuple[str, str, Any]] = []
+    query: list[tuple[str, str, object]] = []
 
     for key, val in data.items():
         append_query(query, key, val, json_keys=json_keys, keys=keys)
@@ -476,9 +477,9 @@ def prepare_count(
     join_sql: str = '',
     groups: Optional[str] = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Prepares arguments for a COUNT query."""
-    props: Dict[str, Any] = {}
+    props: dict[str, Any] = {}
 
     if join_sql:
         validate_sql_fragment('join_sql', join_sql)
@@ -501,12 +502,12 @@ def prepare_count(
 
 def prepare_get_list(
     *args: Any,
-    fields: Optional[List[str]] = None,
+    fields: Optional[list[str]] = None,
     join_sql: str = '',
     groups: Optional[str] = None,
     sorts: Optional[str] = 'id desc',
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Prepares arguments for a SELECT list query."""
     if join_sql:
         validate_sql_fragment('join_sql', join_sql)
@@ -518,7 +519,7 @@ def prepare_get_list(
     if fields is None:
         fields = ['*']
 
-    props: Dict[str, Any] = {}
+    props: dict[str, Any] = {}
 
     part_sql, sql_args = gen_query(*args, **kwargs)
     props['part_sql'] = part_sql
@@ -537,7 +538,7 @@ def prepare_get_list(
     return props
 
 
-def popup_data(ret: Any) -> Any:
+def popup_data(ret: object) -> object:
     """Promotes keys inside a 'data' sub-dictionary to the top level."""
     if isinstance(ret, dict):
         data = ret.pop('data', None)
@@ -547,8 +548,9 @@ def popup_data(ret: Any) -> Any:
     return ret
 
 
-def make_data(data: Dict[str, Any],
-              exclude_data_keys: Optional[List[str]] = None) -> Dict[str, Any]:
+def make_data(
+        data: dict[str, object],
+        exclude_data_keys: Optional[list[str]] = None) -> dict[str, object]:
     """Moves non-excluded keys into a nested 'data' dictionary."""
     exclude_data_keys = exclude_data_keys or []
     new = {}
@@ -563,13 +565,13 @@ def make_data(data: Dict[str, Any],
 
 
 def prepare_get_by_uniq(
-    uniq_keys: Optional[List[str]] = None,
-    optional_keys: Optional[List[str]] = None,
+    uniq_keys: Optional[list[str]] = None,
+    optional_keys: Optional[list[str]] = None,
     required_uniq_keys: bool = True,
     ignore_extra_keys: bool = False,
-    fields: Optional[List[str]] = None,
-    **data: Any,
-) -> Tuple[bool, Dict[str, Any]]:
+    fields: Optional[list[str]] = None,
+    **data: object,
+) -> tuple[bool, dict[str, object]]:
     """
     Prepares arguments to fetch a record by unique keys.
     Returns (get_max_id_mode, props).
@@ -578,7 +580,7 @@ def prepare_get_by_uniq(
     optional_keys = optional_keys or []
     fields = fields or ['*']
 
-    props: Dict[str, Any] = {}
+    props: dict[str, object] = {}
     part_sql = []
     args = []
 
@@ -618,15 +620,15 @@ def prepare_get_by_uniq(
 
 def prepare_get_by_id(
     id: Optional[int] = None,
-    fields: Optional[List[str]] = None,
+    fields: Optional[list[str]] = None,
     ignore_extra_keys: bool = False,
-    **data: Any,
-) -> Dict[str, Any]:
+    **data: object,
+) -> dict[str, object]:
     """Prepares arguments to fetch a record by primary key (id)."""
     fields = fields or ['*']
-    props: Dict[str, Any] = {}
+    props: dict[str, object] = {}
     part_sql = []
-    args = []
+    args: list[object] = []
 
     part_sql.append('id=%s')
     args.append(id)
