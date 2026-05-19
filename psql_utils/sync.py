@@ -18,7 +18,7 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from psycopg.rows import RowFactory, dict_row
 
-from .types import TableName, Column, IndexName, c
+from .types import TableName, Column, IndexName, c, columns_to_string
 from . import gen
 from ._fixed_execute_utils import has_sql_args, row_to_dict, rows_to_dicts
 from ._pool_utils import is_closing_runtime_error
@@ -145,6 +145,7 @@ R_co = TypeVar("R_co", covariant=True)
 
 
 class RunWithPoolWrappedFunc(Protocol[P, R_co]):
+
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R_co:
         ...
 
@@ -163,9 +164,7 @@ def run_with_pool(
     connection loss.
     """
 
-    def decorator(
-        f: Callable[P, R],
-    ) -> RunWithPoolWrappedFunc[P, R]:
+    def decorator(f: Callable[P, R]) -> RunWithPoolWrappedFunc[P, R]:
 
         @wraps(f)
         def run(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -188,11 +187,8 @@ def run_with_pool(
                 # No explicit/current cursor; create a new connection context.
                 pool = connector.get()
                 with pool.connection() as conn:
-                    cursor_cm = (
-                        conn.cursor()
-                        if row_factory_fn is None
-                        else conn.cursor(row_factory=row_factory_fn)
-                    )
+                    cursor_cm = (conn.cursor() if row_factory_fn is None else
+                                 conn.cursor(row_factory=row_factory_fn))
                     with cursor_cm as c0:
                         with with_cursor(c0):
                             return run_wrapped_in_txn_if_needed(c0)
@@ -251,6 +247,16 @@ def fixed_execute(
 def fixed_execute(
     sql: str,
     args: SQLArgs | None = None,
+    fetch: Literal['one'] = 'one',
+    as_dict: bool = False,
+) -> RowValue | RowDict | None:
+    ...
+
+
+@overload
+def fixed_execute(
+    sql: str,
+    args: SQLArgs | None = None,
     fetch: Literal['all'] = 'all',
     as_dict: Literal[False] = False,
 ) -> Rows:
@@ -264,6 +270,16 @@ def fixed_execute(
     fetch: Literal['all'] = 'all',
     as_dict: Literal[True] = True,
 ) -> list[RowDict]:
+    ...
+
+
+@overload
+def fixed_execute(
+    sql: str,
+    args: SQLArgs | None = None,
+    fetch: Literal['all'] = 'all',
+    as_dict: bool = False,
+) -> Rows | list[RowDict]:
     ...
 
 
@@ -326,14 +342,66 @@ def create_index(
     fixed_execute(sql)
 
 
-def get_only_default(
-    default: object,
-    key: Optional[str] = None,
-) -> object:
-    """Fetches a single value or returns a default."""
-    cur = _get_cursor_or_raise()
-    ret = cur.fetchone()
-    return get_only_default_from_row(ret, default, key)
+def _validate_returning_args(
+    ret_column: Optional[Column],
+    ret_columns: Optional[list[Column]],
+) -> None:
+    if ret_column and ret_columns:
+        raise ValueError('ret_column and ret_columns are mutually exclusive')
+
+
+def _append_returning_sql(
+    sql: str,
+    ret_column: Optional[Column],
+    ret_columns: Optional[list[Column]],
+) -> str:
+    if ret_columns:
+        return f'{sql} RETURNING {columns_to_string(ret_columns)}'
+    if ret_column:
+        return f'{sql} RETURNING {ret_column}'
+    return sql
+
+
+def _is_empty_result_row(row: RowValue | RowDict | None) -> bool:
+    if row is None:
+        return True
+    if isinstance(row, Mapping):
+        return len(row) <= 0
+    if isinstance(row, (list, tuple)):
+        return len(row) <= 0
+    return False
+
+
+def _execute_write_with_returning(
+    sql: str,
+    args: SQLArgs,
+    ret_column: Optional[Column],
+    ret_columns: Optional[list[Column]],
+    ret_def: Optional[object],
+    required: bool,
+    err_msg: str,
+    as_dict: bool = False,
+) -> int | object | RowValue | RowDict | None:
+    if not (ret_column or ret_columns):
+        cur = cast(Cursor, fixed_execute(sql, args))
+        if required and cur.rowcount <= 0:
+            raise QueryResultError(err_msg)
+        return cur.rowcount
+    row = cast(
+        RowValue | RowDict | None,
+        fixed_execute(
+            _append_returning_sql(sql, ret_column, ret_columns),
+            args,
+            fetch='one',
+            as_dict=as_dict,
+        ),
+    )
+    if required and _is_empty_result_row(row):
+        raise QueryResultError(err_msg)
+    if ret_columns:
+        return row
+    ret = get_only_default_from_row(cast(RowValue | None, row), ret_def)
+    return ret
 
 
 @run_with_pool()
@@ -342,24 +410,25 @@ def insert(
     columns: list[Column],
     args: SQLArgs,
     ret_column: Optional[Column] = None,
+    ret_columns: Optional[list[Column]] = None,
     ret_def: Optional[object] = None,
     required: bool = False,
     err_msg: str = 'insert failed',
-) -> object | None:
-    """Executes an INSERT statement and optionally returns a value."""
-    sql = gen.gen_insert(
-        table_name=table_name,
-        columns=columns,
+    as_dict: bool = False,
+) -> int | object | RowValue | RowDict | None:
+    """Executes an INSERT statement; defaults to returning rowcount."""
+    _validate_returning_args(ret_column, ret_columns)
+    sql = gen.gen_insert(table_name=table_name, columns=columns)
+    return _execute_write_with_returning(
+        sql=sql,
+        args=args,
         ret_column=ret_column,
+        ret_columns=ret_columns,
+        ret_def=ret_def,
+        required=required,
+        err_msg=err_msg,
+        as_dict=as_dict,
     )
-    fixed_execute(sql, args)
-
-    if ret_column:
-        ret = get_only_default(ret_def)
-        if required and ret is None:
-            raise QueryResultError(err_msg)
-        return ret
-    return None
 
 
 @run_with_pool()
@@ -382,19 +451,34 @@ def insert_or_update(
 
 @run_with_pool()
 def update(
-        table_name: TableName,
-        columns: list[Column],
-        part_sql: str = '',
-        args: SQLArgs = (),
-) -> int:
-    """Executes an UPDATE statement."""
+    table_name: TableName,
+    columns: list[Column],
+    part_sql: str = '',
+    args: SQLArgs = (),
+    ret_column: Optional[Column] = None,
+    ret_columns: Optional[list[Column]] = None,
+    ret_def: Optional[object] = None,
+    required: bool = False,
+    err_msg: str = 'update failed',
+    as_dict: bool = False,
+) -> int | object | RowValue | RowDict | None:
+    """Executes an UPDATE statement; defaults to returning rowcount."""
+    _validate_returning_args(ret_column, ret_columns)
     sql = gen.gen_update(
         table_name=table_name,
         columns=columns,
         part_sql=part_sql,
     )
-    cur = fixed_execute(sql, args)
-    return cur.rowcount
+    return _execute_write_with_returning(
+        sql=sql,
+        args=args,
+        ret_column=ret_column,
+        ret_columns=ret_columns,
+        ret_def=ret_def,
+        required=required,
+        err_msg=err_msg,
+        as_dict=as_dict,
+    )
 
 
 @run_with_pool()
@@ -423,8 +507,8 @@ def sum(
         column=column,
         join_sql=join_sql,
     )
-    fixed_execute(sql, args)
-    return int(cast(SupportsInt, get_only_default(0)))
+    ret = cast(RowValue | None, fixed_execute(sql, args, fetch='one'))
+    return int(cast(SupportsInt, get_only_default_from_row(ret, 0)))
 
 
 @run_with_pool()
@@ -444,8 +528,8 @@ def count(
         join_sql=join_sql,
         groups=groups,
     )
-    fixed_execute(sql, args)
-    return int(cast(SupportsInt, get_only_default(0)))
+    ret = cast(RowValue | None, fixed_execute(sql, args, fetch='one'))
+    return int(cast(SupportsInt, get_only_default_from_row(ret, 0)))
 
 
 @run_with_pool(row_factory_fn=dict_row)
@@ -587,5 +671,5 @@ def group_count(
         groups=groups,
         sorts=sorts,
     )
-    fixed_execute(sql, args)
-    return int(cast(SupportsInt, get_only_default(0)))
+    ret = cast(RowValue | None, fixed_execute(sql, args, fetch='one'))
+    return int(cast(SupportsInt, get_only_default_from_row(ret, 0)))

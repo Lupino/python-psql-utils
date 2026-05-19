@@ -17,4 +17,6 @@ def get_only_default_from_row(
             return ret.get(key, default)
         values = iter(ret.values())
         return next(values, default)
+    if len(ret) <= 0:
+        return default
     return ret[0]
