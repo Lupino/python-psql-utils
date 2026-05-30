@@ -2,7 +2,6 @@ from functools import wraps
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import (
-    Any,
     Optional,
     Awaitable,
     Callable,
@@ -17,7 +16,6 @@ from collections.abc import AsyncIterator, Mapping
 
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
-from psycopg.rows import AsyncRowFactory, dict_row
 
 from .types import TableName, Column, IndexName, c, columns_to_string
 from . import gen
@@ -157,12 +155,8 @@ class RunWithPoolWrappedFunc(Protocol[P, R_co]):
 
 
 def run_with_pool(
-    row_factory_fn: AsyncRowFactory[Any] | None = None,
     transaction: bool = False,
-) -> Callable[
-    [Callable[P, Awaitable[R]]],
-        RunWithPoolWrappedFunc[P, R],
-]:
+) -> Callable[[Callable[P, Awaitable[R]]], RunWithPoolWrappedFunc[P, R]]:
     """
     Decorator to inject a cursor into the function.
     It first tries a cursor from with_cursor(...). If unavailable, it acquires
@@ -191,12 +185,9 @@ def run_with_pool(
                 if connector is None:
                     raise PGConnectorError('Not connected')
 
-                # No explicit/current cursor; create a new connection context.
                 pool = connector.get()
                 async with pool.connection() as conn:
-                    cursor_cm = (conn.cursor() if row_factory_fn is None else
-                                 conn.cursor(row_factory=row_factory_fn))
-                    async with cursor_cm as c0:
+                    async with conn.cursor() as c0:
                         async with with_cursor(c0):
                             return await run_wrapped_in_txn_if_needed(c0)
             except RuntimeError as e:
@@ -290,6 +281,7 @@ async def fixed_execute(
     ...
 
 
+@run_with_pool()
 async def fixed_execute(
     sql: str,
     args: SQLArgs | None = None,
@@ -319,7 +311,6 @@ async def fixed_execute(
     return cur
 
 
-@run_with_pool()
 async def create_table(
     table_name: TableName,
     columns: list[Column],
@@ -328,7 +319,6 @@ async def create_table(
     await fixed_execute(gen.gen_create_table(table_name, columns))
 
 
-@run_with_pool()
 async def add_table_column(
     table_name: TableName,
     columns: list[Column],
@@ -337,7 +327,6 @@ async def add_table_column(
     await fixed_execute(gen.gen_add_table_column(table_name, columns))
 
 
-@run_with_pool()
 async def create_index(
     uniq: bool,
     table_name: TableName,
@@ -411,7 +400,6 @@ async def _execute_write_with_returning(
     return ret
 
 
-@run_with_pool()
 async def insert(
     table_name: TableName,
     columns: list[Column],
@@ -438,7 +426,6 @@ async def insert(
     )
 
 
-@run_with_pool()
 async def insert_or_update(
         table_name: TableName,
         uniq_columns: list[Column],
@@ -456,7 +443,6 @@ async def insert_or_update(
     await fixed_execute(sql, args)
 
 
-@run_with_pool()
 async def update(
     table_name: TableName,
     columns: list[Column],
@@ -488,7 +474,6 @@ async def update(
     )
 
 
-@run_with_pool()
 async def delete(
         table_name: TableName,
         part_sql: str = '',
@@ -499,7 +484,6 @@ async def delete(
     await fixed_execute(sql, args)
 
 
-@run_with_pool()
 async def sum(
         table_name: TableName,
         part_sql: str = '',
@@ -518,7 +502,6 @@ async def sum(
     return int(cast(SupportsInt, get_only_default_from_row(ret, 0)))
 
 
-@run_with_pool()
 async def count(
     table_name: TableName,
     part_sql: str = '',
@@ -539,7 +522,6 @@ async def count(
     return int(cast(SupportsInt, get_only_default_from_row(ret, 0)))
 
 
-@run_with_pool(row_factory_fn=dict_row)
 async def select(
     table_name: TableName,
     columns: list[Column],
@@ -606,7 +588,6 @@ async def select_only(
     return [list(x.values())[0] for x in ret]
 
 
-@run_with_pool(row_factory_fn=dict_row)
 async def select_one(
     table_name: TableName,
     columns: list[Column],
@@ -654,14 +635,12 @@ async def select_one_only(
     return None
 
 
-@run_with_pool()
 async def drop_table(table_name: TableName) -> None:
     """Executes a DROP TABLE statement."""
     sql = gen.gen_drop_table(table_name)
     await fixed_execute(sql)
 
 
-@run_with_pool()
 async def group_count(
     table_name: TableName,
     columns: list[Column],

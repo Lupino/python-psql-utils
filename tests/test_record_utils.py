@@ -1,6 +1,6 @@
 import json
 import unittest
-from typing import Any
+from typing import Any, cast
 
 from psql_utils.record_utils import (
     gen_query,
@@ -44,7 +44,7 @@ class RecordUtilsTests(unittest.TestCase):
         )
         self.assertEqual(keys, ["meta"])
         self.assertEqual(
-            json.loads(args[0]),
+            json.loads(cast(str, args[0])),
             {
                 "a": 1,
                 "b": {

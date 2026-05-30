@@ -14,11 +14,22 @@ def has_sql_args(args: SQLArgs | None) -> bool:
         return True
 
 
+def _description_names(description: Description) -> list[str]:
+    if not description:
+        raise ValueError('cursor description is required for dict rows')
+    return [d.name for d in description]
+
+
 def row_to_dict(row: RowValue, description: Description) -> RowDict:
     """Convert a fetched row to dict using cursor description when needed."""
     if isinstance(row, Mapping):
         return dict(row)
-    cols = [d.name for d in (description or ())]
+
+    cols = _description_names(description)
+    if len(cols) != len(row):
+        raise ValueError(
+            'row length does not match cursor description: '
+            f'{len(row)} values for {len(cols)} columns')
     return dict(zip(cols, row))
 
 
@@ -27,11 +38,4 @@ def rows_to_dicts(rows: Rows | None,
     """Convert fetched rows to list[dict]."""
     if not rows:
         return []
-    first = rows[0]
-    if isinstance(first, Mapping):
-        return [
-            dict(row) if isinstance(row, Mapping) else row_to_dict(
-                row, description) for row in rows
-        ]
-    cols = [d.name for d in (description or ())]
-    return [dict(zip(cols, row)) for row in rows]
+    return [row_to_dict(row, description) for row in rows]

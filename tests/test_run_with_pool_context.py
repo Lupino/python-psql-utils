@@ -1,16 +1,22 @@
+from __future__ import annotations
+
 import unittest
-from typing import Any
+from typing import Any, cast
 
 import psql_utils
 import psql_utils.sync as psql_sync
 
 
 class _AsyncDummyCursor:
+    connection: _AsyncConn
+
     def __init__(self, value: int) -> None:
         self.value = value
 
 
 class _SyncDummyCursor:
+    connection: _SyncConn
+
     def __init__(self, value: int) -> None:
         self.value = value
 
@@ -139,24 +145,34 @@ class _SyncConnector:
         return self.pool
 
 
-@psql_utils.run_with_pool()
-async def _async_add(x: int) -> int:
+def _get_async_dummy_cursor() -> _AsyncDummyCursor:
     cur = psql_utils.get_cursor()
     assert cur is not None
+    return cast(_AsyncDummyCursor, cur)
+
+
+def _get_sync_dummy_cursor() -> _SyncDummyCursor:
+    cur = psql_sync.get_cursor()
+    assert cur is not None
+    return cast(_SyncDummyCursor, cur)
+
+
+@psql_utils.run_with_pool()
+async def _async_add(x: int) -> int:
+    cur = _get_async_dummy_cursor()
     return cur.value + x
 
 
 @psql_sync.run_with_pool()
 def _sync_add(x: int) -> int:
-    cur = psql_sync.get_cursor()
-    assert cur is not None
+    cur = _get_sync_dummy_cursor()
     return cur.value + x
 
 
 class RunWithPoolAsyncContextTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_cursor_from_contextvar_without_connector(self) -> None:
         cur = _AsyncDummyCursor(10)
-        async with psql_utils.with_cursor(cur):
+        async with psql_utils.with_cursor(cast(Any, cur)):
             ret = await _async_add(5)
         self.assertEqual(ret, 15)
 
@@ -165,12 +181,11 @@ class RunWithPoolAsyncContextTests(unittest.IsolatedAsyncioTestCase):
         conn = _AsyncConn(cur)
         connector = _AsyncConnector(_AsyncPool(conn))
         original_connector = psql_utils._connector
-        psql_utils._connector = connector
+        psql_utils._connector = cast(Any, connector)
 
         @psql_utils.run_with_pool()
         async def inner(x: int) -> int:
-            cur = psql_utils.get_cursor()
-            assert cur is not None
+            cur = _get_async_dummy_cursor()
             return cur.value + x
 
         @psql_utils.run_with_pool()
@@ -191,27 +206,27 @@ class RunWithPoolAsyncContextTests(unittest.IsolatedAsyncioTestCase):
 
         @psql_utils.run_with_pool(transaction=True)
         async def add(x: int) -> int:
-            c = psql_utils.get_cursor()
-            assert c is not None
+            c = _get_async_dummy_cursor()
             return c.value + x
 
-        async with psql_utils.with_cursor(cur):
+        async with psql_utils.with_cursor(cast(Any, cur)):
             ret = await add(5)
 
         self.assertEqual(ret, 15)
         self.assertEqual(conn.transaction_calls, 0)
 
-    async def test_transaction_true_uses_transaction_for_new_cursor(self) -> None:
+    async def test_transaction_true_uses_transaction_for_new_cursor(
+        self,
+    ) -> None:
         cur = _AsyncDummyCursor(10)
         conn = _AsyncConn(cur)
         connector = _AsyncConnector(_AsyncPool(conn))
         original_connector = psql_utils._connector
-        psql_utils._connector = connector
+        psql_utils._connector = cast(Any, connector)
 
         @psql_utils.run_with_pool(transaction=True)
         async def add(x: int) -> int:
-            c = psql_utils.get_cursor()
-            assert c is not None
+            c = _get_async_dummy_cursor()
             return c.value + x
 
         try:
@@ -223,10 +238,11 @@ class RunWithPoolAsyncContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conn.cursor_calls, 1)
         self.assertEqual(conn.transaction_calls, 1)
 
+
 class RunWithPoolSyncContextTests(unittest.TestCase):
     def test_uses_cursor_from_contextvar_without_connector(self) -> None:
         cur = _SyncDummyCursor(10)
-        with psql_sync.with_cursor(cur):
+        with psql_sync.with_cursor(cast(Any, cur)):
             ret = _sync_add(5)
         self.assertEqual(ret, 15)
 
@@ -235,12 +251,11 @@ class RunWithPoolSyncContextTests(unittest.TestCase):
         conn = _SyncConn(cur)
         connector = _SyncConnector(_SyncPool(conn))
         original_connector = psql_sync._connector
-        psql_sync._connector = connector
+        psql_sync._connector = cast(Any, connector)
 
         @psql_sync.run_with_pool()
         def inner(x: int) -> int:
-            cur = psql_sync.get_cursor()
-            assert cur is not None
+            cur = _get_sync_dummy_cursor()
             return cur.value + x
 
         @psql_sync.run_with_pool()
@@ -261,11 +276,10 @@ class RunWithPoolSyncContextTests(unittest.TestCase):
 
         @psql_sync.run_with_pool(transaction=True)
         def add(x: int) -> int:
-            c = psql_sync.get_cursor()
-            assert c is not None
+            c = _get_sync_dummy_cursor()
             return c.value + x
 
-        with psql_sync.with_cursor(cur):
+        with psql_sync.with_cursor(cast(Any, cur)):
             ret = add(5)
 
         self.assertEqual(ret, 15)
@@ -276,12 +290,11 @@ class RunWithPoolSyncContextTests(unittest.TestCase):
         conn = _SyncConn(cur)
         connector = _SyncConnector(_SyncPool(conn))
         original_connector = psql_sync._connector
-        psql_sync._connector = connector
+        psql_sync._connector = cast(Any, connector)
 
         @psql_sync.run_with_pool(transaction=True)
         def add(x: int) -> int:
-            c = psql_sync.get_cursor()
-            assert c is not None
+            c = _get_sync_dummy_cursor()
             return c.value + x
 
         try:
